@@ -1,0 +1,1 @@
+{ "mcpServers": { "flutter-it": { "command": "node", "args": ["./mcp_server/src/index.js"] } } }

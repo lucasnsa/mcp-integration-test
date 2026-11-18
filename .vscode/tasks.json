@@ -1,0 +1,10 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "adb forward 8765",
+      "type": "shell",
+      "command": "adb forward tcp:8765 tcp:8765"
+    }
+  ]
+}

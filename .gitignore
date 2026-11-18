@@ -1,0 +1,24 @@
+# Node (mcp_server)
+node_modules/
+npm-debug.log*
+
+# Dart / Flutter (packages/*, example/ keeps its own .gitignore too)
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+coverage/
+# Library package: lockfile is not committed (example/ app keeps its own)
+packages/*/pubspec.lock
+
+# Editors / OS
+.idea/
+*.iml
+.DS_Store
+# Machine-specific absolute paths (cmake extension); launch.json/tasks.json stay tracked
+.vscode/settings.json
+
+# Claude Code local state
+.claude/settings.local.json
+graphify-out/

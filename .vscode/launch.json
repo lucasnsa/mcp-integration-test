@@ -1,0 +1,52 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "App (escolher dispositivo)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/example",
+      "program": "lib/main.dart"
+    },
+    {
+      "name": "App - Web (Chrome)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/example",
+      "program": "lib/main.dart",
+      "deviceId": "chrome"
+    },
+    {
+      "name": "App - Android",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/example",
+      "program": "lib/main.dart",
+      "deviceId": "android"
+    },
+    {
+      "name": "MCP build - Linux",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/example",
+      "program": "integration_test/mcp_test.dart",
+      "deviceId": "linux"
+    },
+    {
+      "name": "MCP build - Android (adb forward)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/example",
+      "program": "integration_test/mcp_test.dart",
+      "deviceId": "android",
+      "preLaunchTask": "adb forward 8765"
+    },
+    {
+      "name": "MCP build - escolher dispositivo",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/example",
+      "program": "integration_test/mcp_test.dart"
+    }
+  ]
+}
