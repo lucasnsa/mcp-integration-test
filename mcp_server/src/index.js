@@ -2,12 +2,17 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { AppClient } from './client.js';
 import { AppLauncher } from './launcher.js';
+import { loadEnvFile } from './env.js';
 
 const DEFAULT_PORT = Number(process.env.MCP_IT_PORT ?? 8765);
 let client = new AppClient(process.env.MCP_IT_URL ?? `http://127.0.0.1:${DEFAULT_PORT}`);
 const launcher = new AppLauncher();
+/** dotenv file with test data; read here so secret values never reach the client. */
+const ENV_FILE = process.env.MCP_IT_ENV_FILE;
 
 const server = new McpServer({ name: 'flutter-integration-test', version: '0.1.0' });
 
@@ -18,16 +23,59 @@ const text = (value) => ({
 });
 const fail = (e) => ({ isError: true, content: [{ type: 'text', text: e.message ?? String(e) }] });
 
-/** Registers a tool that forwards to the app; `shape` is a zod raw shape. */
-function appTool(name, description, shape, method, { map, timeoutMs } = {}) {
-  server.registerTool(name, { description, inputSchema: shape }, async (args) => {
-    try {
-      const body = await client.call(method ?? name, args, timeoutMs);
-      const out = map ? map(body.result, args) : text(withExceptions(body.result, body));
-      return out;
-    } catch (e) {
-      return fail(e);
-    }
+/** Width of evidence screenshots taken through `shot` (logical width of a smartPOS). */
+const SHOT_WIDTH = Number(process.env.MCP_IT_SHOT_WIDTH ?? 360);
+
+const shotFields = {
+  shot: z
+    .string()
+    .optional()
+    .describe('Absolute .png path: after the action, save a screenshot there (evidence) in the same call'),
+  shotImage: z.boolean().optional().describe('Also return that screenshot as an image (default false: saved only)'),
+};
+
+/**
+ * Saves an evidence screenshot after an action. Best effort: a failed capture is
+ * reported as text and never hides the action's own result.
+ */
+async function captureShot(path, withImage) {
+  try {
+    const { result } = await client.call('screenshot', { maxWidth: SHOT_WIDTH });
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, Buffer.from(result.pngBase64, 'base64'));
+    const items = [{ type: 'text', text: `shot saved ${path}` }];
+    if (withImage) items.unshift({ type: 'image', data: result.pngBase64, mimeType: 'image/png' });
+    return items;
+  } catch (e) {
+    return [{ type: 'text', text: `shot failed: ${e.message ?? e}` }];
+  }
+}
+
+/** Runs an action and, when `shot` is given, appends the evidence screenshot. */
+async function withShot({ shot, shotImage }, action) {
+  let out;
+  try {
+    out = await action();
+  } catch (e) {
+    out = fail(e);
+  }
+  if (shot) out = { ...out, content: [...out.content, ...(await captureShot(shot, shotImage))] };
+  return out;
+}
+
+/**
+ * Registers a tool that forwards to the app; `shape` is a zod raw shape.
+ * With `shots: true` the tool also accepts `shot`/`shotImage` (evidence in the same call).
+ */
+function appTool(name, description, shape, method, { map, timeoutMs, shots = false } = {}) {
+  const inputSchema = shots ? { ...shape, ...shotFields } : shape;
+  server.registerTool(name, { description, inputSchema }, async (args) => {
+    const { shot, shotImage, ...params } = args;
+    const run = async () => {
+      const body = await client.call(method ?? name, params, timeoutMs);
+      return map ? map(body.result, params) : text(withExceptions(body.result, body));
+    };
+    return shots ? withShot({ shot, shotImage }, run) : run().catch(fail);
   });
 }
 
@@ -151,13 +199,24 @@ appTool('getText', 'Text content of the matched widget (Text / TextField), inclu
 server.registerTool(
   'screenshot',
   {
-    description: 'PNG screenshot of the app (debug/profile builds).',
-    inputSchema: { maxWidth: z.number().optional().describe('Max width in px (default 800)') },
+    description:
+      'PNG screenshot of the app (debug/profile builds). Returns the image; with `path` it is also saved to that file (evidence).',
+    inputSchema: {
+      maxWidth: z.number().optional().describe('Max width in px (default 800)'),
+      path: z.string().optional().describe('Absolute path of a .png file to save the screenshot to'),
+    },
   },
-  async (args) => {
+  async ({ maxWidth, path }) => {
     try {
-      const { result } = await client.call('screenshot', args);
-      return { content: [{ type: 'image', data: result.pngBase64, mimeType: 'image/png' }, { type: 'text', text: `${result.width}x${result.height}` }] };
+      const { result } = await client.call('screenshot', maxWidth === undefined ? {} : { maxWidth });
+      const content = [{ type: 'image', data: result.pngBase64, mimeType: 'image/png' }];
+      if (path) {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, Buffer.from(result.pngBase64, 'base64'));
+        content.push({ type: 'text', text: `saved ${path}` });
+      }
+      content.push({ type: 'text', text: `${result.width}x${result.height}` });
+      return { content };
     } catch (e) {
       return fail(e);
     }
@@ -166,17 +225,79 @@ server.registerTool(
 
 // --- actions -----------------------------------------------------------
 
-appTool('tap', 'Tap the matched widget.', { finder, ...settle });
-appTool('longPress', 'Long-press the matched widget.', { finder, ...settle });
-appTool('doubleTap', 'Double-tap the matched widget.', { finder, ...settle });
-appTool('tapAt', 'Tap at logical-pixel coordinates (use bounds from snapshot).', { x: z.number(), y: z.number(), ...settle });
+const shots = { shots: true };
+appTool('tap', 'Tap the matched widget.', { finder, ...settle }, undefined, shots);
+appTool('longPress', 'Long-press the matched widget.', { finder, ...settle }, undefined, shots);
+appTool('doubleTap', 'Double-tap the matched widget.', { finder, ...settle }, undefined, shots);
+appTool(
+  'tapAt',
+  'Tap at logical-pixel coordinates (use bounds from snapshot).',
+  { x: z.number(), y: z.number(), ...settle },
+  undefined,
+  shots,
+);
 appTool(
   'enterText',
   'Type text into the matched TextField (replaces its content).',
   { finder, text: z.string(), submit: z.boolean().optional().describe('Send the "done" keyboard action afterwards'), ...settle },
+  undefined,
+  shots,
 );
-appTool('drag', 'Drag the matched widget by (dx, dy) logical px. Negative dy scrolls content up.', { finder, dx: z.number(), dy: z.number(), ...settle });
-appTool('fling', 'Fling the matched widget.', { finder, dx: z.number(), dy: z.number(), speed: z.number().optional(), ...settle });
+server.registerTool(
+  'enterEnv',
+  {
+    description:
+      'Type the value of a variable from the test env file into the matched TextField (replaces its content). ' +
+      'Use for secrets (login, password): the value is never returned, only its length. Names come from `envKeys`.',
+    inputSchema: {
+      finder,
+      name: z.string().describe('Variable name in the env file, e.g. E2E_LOGIN_PASSWORD'),
+      submit: z.boolean().optional().describe('Send the "done" keyboard action afterwards'),
+      ...settle,
+      ...shotFields,
+    },
+  },
+  async (args) => {
+    const { name, shot, shotImage, ...params } = args;
+    return withShot({ shot, shotImage }, async () => {
+      const values = ENV_FILE ? loadEnvFile(ENV_FILE) : new Map();
+      if (!values.has(name)) {
+        const names = [...values.keys()].join(', ') || 'none';
+        throw new Error(`Variable "${name}" is not defined in the env file (available names: ${names}).`);
+      }
+      const value = values.get(name);
+      const body = await client.call('enterText', { ...params, text: value });
+      return text({ typed: name, chars: [...value].length, settled: body.result.settled });
+    });
+  },
+);
+
+server.registerTool(
+  'envKeys',
+  { description: 'Names (never values) of the variables available to enterEnv.', inputSchema: {} },
+  async () => {
+    try {
+      return text({ keys: ENV_FILE ? [...loadEnvFile(ENV_FILE).keys()] : [] });
+    } catch (e) {
+      return fail(e);
+    }
+  },
+);
+
+appTool(
+  'drag',
+  'Drag the matched widget by (dx, dy) logical px. Negative dy scrolls content up.',
+  { finder, dx: z.number(), dy: z.number(), ...settle },
+  undefined,
+  shots,
+);
+appTool(
+  'fling',
+  'Fling the matched widget.',
+  { finder, dx: z.number(), dy: z.number(), speed: z.number().optional(), ...settle },
+  undefined,
+  shots,
+);
 appTool(
   'scrollUntilVisible',
   'Scroll a scrollable until the target widget is built and visible.',
@@ -189,13 +310,19 @@ appTool(
     ...settle,
   },
   undefined,
-  { timeoutMs: 120_000 },
+  { timeoutMs: 120_000, shots: true },
 );
-appTool('pressBack', 'Simulate the system back button / pop route.', {});
-appTool('sendKey', 'Send a keyboard key.', {
-  key: z.enum(['enter', 'tab', 'escape', 'backspace', 'space', 'arrowUp', 'arrowDown', 'arrowLeft', 'arrowRight']),
-  ...settle,
-});
+appTool('pressBack', 'Simulate the system back button / pop route.', {}, undefined, shots);
+appTool(
+  'sendKey',
+  'Send a keyboard key.',
+  {
+    key: z.enum(['enter', 'tab', 'escape', 'backspace', 'space', 'arrowUp', 'arrowDown', 'arrowLeft', 'arrowRight']),
+    ...settle,
+  },
+  undefined,
+  shots,
+);
 appTool('pump', 'Advance the frame clock by N ms.', { ms: z.number().int().optional() });
 appTool('pumpAndSettle', 'Pump until no animation is running; errors on endless animations.', { timeoutMs: z.number().int().optional() });
 
@@ -206,7 +333,7 @@ appTool(
   'Wait until a widget appears (or disappears with absent=true).',
   { finder, absent: z.boolean().optional(), timeoutMs: z.number().int().optional().describe('default 10000') },
   undefined,
-  { timeoutMs: 600_000 },
+  { timeoutMs: 600_000, shots: true },
 );
 appTool(
   'expect',

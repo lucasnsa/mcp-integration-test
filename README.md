@@ -67,6 +67,7 @@ Actions pump and wait for animations by default (never fails on endless animatio
 
 ## Notes / limits
 
+- Requires Flutter **>= 3.35.0** (Dart 3.9). Verified on 3.35.0 and 3.47.7 (headless).
 - Needs `dart:io`: mobile and desktop, **not Flutter web**.
 - Server binds to loopback only and rejects requests with an `Origin` header or a non-JSON content type.
 - Screenshots use the render layer (debug/profile builds), so they work on every platform without the native plugin.

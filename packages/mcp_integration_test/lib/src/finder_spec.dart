@@ -85,7 +85,8 @@ class FinderSpec {
 
   static String? _textOf(Widget w) {
     if (w is Text) return w.data ?? w.textSpan?.toPlainText();
-    if (w is EditableText) return w.controller.text;
+    // Obscured fields match only their mask, so a finder can't probe a password.
+    if (w is EditableText) return w.obscureText ? '•' * w.controller.text.length : w.controller.text;
     return null;
   }
 }

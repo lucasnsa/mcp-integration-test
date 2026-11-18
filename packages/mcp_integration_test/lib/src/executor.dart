@@ -118,7 +118,7 @@ class CommandExecutor {
         return;
       }
       if (w is EditableText) {
-        texts.add(w.controller.text);
+        texts.add(_editableText(w));
         return;
       }
       e.visitChildren(collect);
@@ -261,8 +261,12 @@ class CommandExecutor {
     if (layer is! OffsetLayer) {
       throw StateError('Screenshots need a debug/profile build (render layer unavailable).');
     }
+    // The root layer lives in physical pixels (the device pixel ratio is baked
+    // into its transform), so capture the whole physical view and scale it to
+    // `ratio` relative to the device pixel ratio. Capturing `Offset.zero &
+    // logical` zooms the content by `dpr` and crops it.
     final bytes = await tester.runAsync(() async {
-      final image = await layer.toImage(Offset.zero & logical, pixelRatio: ratio);
+      final image = await layer.toImage(Offset.zero & view.physicalSize, pixelRatio: ratio / dpr);
       try {
         final data = await image.toByteData(format: ui.ImageByteFormat.png);
         return data!.buffer.asUint8List();
@@ -322,7 +326,7 @@ class CommandExecutor {
     final render = e.renderObject;
     String? text;
     if (w is Text) text = w.data ?? w.textSpan?.toPlainText();
-    if (w is EditableText) text = w.controller.text;
+    if (w is EditableText) text = _editableText(w);
     return {
       'type': w.runtimeType.toString(),
       if (w.key is ValueKey) 'key': '${(w.key! as ValueKey).value}',
@@ -334,6 +338,11 @@ class CommandExecutor {
         ],
     };
   }
+
+  /// Text of an input as reported to the client. Obscured fields (passwords)
+  /// are masked, like `snapshot` does: their value must never leave the app.
+  static String _editableText(EditableText w) =>
+      w.obscureText ? '•' * w.controller.text.length : w.controller.text;
 
   static int? _int(Map<String, Object?> p, String k) => (p[k] as num?)?.toInt();
 
