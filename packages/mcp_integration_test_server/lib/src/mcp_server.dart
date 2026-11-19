@@ -1,0 +1,667 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:dart_mcp/server.dart';
+import 'package:dart_mcp/stdio.dart';
+
+import 'package:mcp_integration_test/command_protocol.dart';
+import 'app_client.dart';
+import 'app_launcher.dart';
+
+const _json = JsonEncoder.withIndent('  ');
+const _shutdownTimeout = Duration(seconds: 5);
+const _maxSafeInteger = 9007199254740991;
+
+IntegerSchema _integer({String? description, int minimum = -_maxSafeInteger}) =>
+    Schema.int(
+      description: description,
+      minimum: minimum,
+      maximum: _maxSafeInteger,
+    );
+
+final _finderFields = <String, Schema>{
+  'text': Schema.string(description: 'Exact text of a Text / TextField'),
+  'textContaining': Schema.string(
+    description: 'Substring of a Text / TextField',
+  ),
+  'key': Schema.string(
+    description: 'Value of a ValueKey<String>, e.g. Key("login")',
+  ),
+  'type': Schema.string(
+    description:
+        'Widget runtimeType, e.g. "FilledButton", "TextField", "ListView"',
+  ),
+  'tooltip': Schema.string(),
+  'semanticsLabel': Schema.string(),
+  'includeOffstage': Schema.bool(
+    description: 'Also match offstage widgets (default false)',
+  ),
+  'index': _integer(
+    minimum: 0,
+    description: 'Which match to use when several (default 0)',
+  ),
+};
+
+ObjectSchema _finderSchema({
+  String description =
+      'Matches widgets; all given fields must match the same widget. Prefer key, then text.',
+}) => Schema.object(
+  description: description,
+  properties: {
+    ..._finderFields,
+    'within': Schema.object(
+      properties: _finderFields,
+      description:
+          'Only match inside widgets matching this finder (same fields, no nesting)',
+    ),
+  },
+);
+
+final _finder = {'finder': _finderSchema()};
+final _settle = <String, Schema>{
+  'settle': Schema.bool(
+    description:
+        'Wait for animations to finish after the action (default true)',
+  ),
+  'settleTimeoutMs': _integer(
+    description: 'Max wait for settling (default 3000)',
+  ),
+};
+final _shotFields = <String, Schema>{
+  'shot': Schema.string(
+    description:
+        'Absolute .png path: after the action, save a screenshot there (evidence) in the same call',
+  ),
+  'shotImage': Schema.bool(
+    description:
+        'Also return that screenshot as an image (default false: saved only)',
+  ),
+};
+final _submit = Schema.bool(
+  description: 'Send the "done" keyboard action afterwards',
+);
+
+final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
+  IntegrationTestMcpServer()
+    : super.fromStreamChannel(
+        stdioChannel(input: stdin, output: stdout),
+        implementation: Implementation(
+          name: 'flutter-integration-test',
+          version: '0.1.0',
+        ),
+      ) {
+    _client = AppClient(
+      Platform.environment['MCP_IT_URL'] ?? 'http://127.0.0.1:$_defaultPort',
+    );
+    _registerTools();
+  }
+
+  final _defaultPort =
+      int.tryParse(Platform.environment['MCP_IT_PORT'] ?? '') ??
+      defaultCommandPort;
+  final _shotWidth =
+      num.tryParse(Platform.environment['MCP_IT_SHOT_WIDTH'] ?? '') ?? 360;
+  final _envFile = Platform.environment['MCP_IT_ENV_FILE'];
+  final _launcher = AppLauncher();
+  late AppClient _client;
+  AppClient? _launchedClient;
+  bool _launching = false;
+  Future<CallToolResult>? _stopping;
+
+  /// On MCP disconnect, clean up only a Flutter process we started.
+  Future<void> closeApp() async {
+    final launchedClient = _launchedClient;
+    if (_stopping case final stopping?) {
+      await stopping;
+    } else if (_launcher.running && launchedClient != null) {
+      await _shutdownApp(launchedClient);
+    } else {
+      await _launcher.stop();
+    }
+  }
+
+  void _registerTools() {
+    _tool(
+      'app_launch',
+      'Build and start the Flutter app\'s MCP test entry point (e.g. '
+          'integration_test/mcp_test.dart) on a device, then wait until it '
+          'accepts commands. First build can take minutes.',
+      {
+        'projectDir': Schema.string(
+          description: 'Absolute path of the Flutter project',
+        ),
+        'device': Schema.string(
+          description:
+              'Device id from `flutter devices` (e.g. emulator-5554, linux, <ios simulator id>)',
+        ),
+        'target': Schema.string(
+          description: 'Entry point (default integration_test/mcp_test.dart)',
+        ),
+        'mode': UntitledSingleSelectEnumSchema(
+          values: const ['run', 'test'],
+          description:
+              '"run" = flutter run (default); "test" = flutter test '
+              '(official integration_test flow; non-zero exit when an expect fails)',
+        ),
+        'port': _integer(
+          description: 'In-app server port (default $_defaultPort)',
+        ),
+        'dartDefines': Schema.list(
+          items: Schema.string(),
+          description: 'Extra --dart-define values, KEY=VALUE',
+        ),
+        'extraArgs': Schema.list(
+          items: Schema.string(),
+          description: 'Extra flutter args, e.g. ["--flavor","dev"]',
+        ),
+        'adbForward': Schema.bool(
+          description:
+              'Run `adb forward` for the port (needed for Android devices/emulators)',
+        ),
+        'timeoutSec': _integer(
+          description: 'Max wait for the first build (default 600)',
+        ),
+      },
+      _launch,
+      required: const ['projectDir', 'device'],
+    );
+    _tool(
+      'app_connect',
+      'Point at an already-running MCP test build (started manually). For '
+          'Android run `adb forward tcp:PORT tcp:PORT` first.',
+      {
+        'port': _integer(),
+        'host': Schema.string(description: 'default 127.0.0.1'),
+      },
+      (args) async {
+        final host = args['host'] as String? ?? '127.0.0.1';
+        final port = (args['port'] as num?)?.toInt() ?? _defaultPort;
+        final client = _client = AppClient('http://$host:$port');
+        return await client.health()
+            ? _text({'connected': true, 'url': client.baseUrl})
+            : _fail('Nothing answering at ${client.baseUrl}');
+      },
+    );
+    _tool(
+      'app_logs',
+      'Last lines of the flutter process output (build errors, app prints).',
+      {'lines': _integer()},
+      (args) => _text({
+        'running': _launcher.running,
+        'exit': _launcher.exit,
+        'logs': _launcher.recentLogs((args['lines'] as num?)?.toInt() ?? 60),
+      }),
+    );
+    _tool(
+      'app_stop',
+      'End the session: reports expectation results, shuts the in-app server down '
+          'and stops the flutter process.',
+      {},
+      (_) => _stopApp(),
+    );
+
+    _forward(
+      CommandMethod.status,
+      'Platform, logical screen size, pixel ratio and expectation counters.',
+      {},
+      name: 'app_status',
+    );
+    _forward(
+      CommandMethod.snapshot,
+      'Text description of what is on screen: visible Text, inputs, buttons, switches… '
+      'with key, text, bounds [left, top, width, height] and tappable. '
+      'Call this first and after navigation.',
+      {'maxNodes': _integer(description: 'default 300')},
+    );
+    _forward(
+      CommandMethod.find,
+      'Count and describe widgets matching a finder.',
+      _finder,
+    );
+    _forward(
+      CommandMethod.getText,
+      'Text content of the matched widget (Text / TextField), including descendants.',
+      _finder,
+    );
+    _tool(
+      'screenshot',
+      'PNG screenshot of the app (debug/profile builds). Returns the image; '
+          'with `path` it is also saved to that file (evidence).',
+      {
+        'maxWidth': Schema.num(description: 'Max width in px (default 800)'),
+        'path': Schema.string(
+          description: 'Absolute path of a .png file to save the screenshot to',
+        ),
+      },
+      (args) async {
+        final path = args.remove('path') as String?;
+        final result = await _screenshot(_client, args);
+        final data = result['pngBase64'] as String;
+        if (path != null && path.isNotEmpty) {
+          await _saveScreenshot(path, data);
+        }
+        return CallToolResult(
+          content: [
+            ImageContent(data: data, mimeType: 'image/png'),
+            if (path != null && path.isNotEmpty)
+              TextContent(text: 'saved $path'),
+            TextContent(text: '${result['width']}x${result['height']}'),
+          ],
+        );
+      },
+    );
+
+    _forward(CommandMethod.tap, 'Tap the matched widget.', {
+      ..._finder,
+      ..._settle,
+    }, shots: true);
+    _forward(CommandMethod.longPress, 'Long-press the matched widget.', {
+      ..._finder,
+      ..._settle,
+    }, shots: true);
+    _forward(CommandMethod.doubleTap, 'Double-tap the matched widget.', {
+      ..._finder,
+      ..._settle,
+    }, shots: true);
+    _forward(
+      CommandMethod.tapAt,
+      'Tap at logical-pixel coordinates (use bounds from snapshot).',
+      {'x': Schema.num(), 'y': Schema.num(), ..._settle},
+      required: const ['x', 'y'],
+      shots: true,
+    );
+    _forward(
+      CommandMethod.enterText,
+      'Type text into the matched TextField (replaces its content).',
+      {..._finder, 'text': Schema.string(), 'submit': _submit, ..._settle},
+      required: const ['finder', 'text'],
+      shots: true,
+    );
+    _tool(
+      'enterEnv',
+      'Type the value of a variable from the test env file into the matched TextField '
+          '(replaces its content). Use for secrets (login, password): the value '
+          'is never returned, only its length. Names come from `envKeys`.',
+      {
+        ..._finder,
+        'name': Schema.string(
+          description: 'Variable name in the env file, e.g. E2E_LOGIN_PASSWORD',
+        ),
+        'submit': _submit,
+        ..._settle,
+      },
+      _enterEnv,
+      required: const ['finder', 'name'],
+      shots: true,
+    );
+    _tool(
+      'envKeys',
+      'Names (never values) of the variables available to enterEnv.',
+      {},
+      (_) async => _text({'keys': (await _readEnv()).keys.toList()}),
+    );
+    _forward(
+      CommandMethod.drag,
+      'Drag the matched widget by (dx, dy) logical px. Negative dy scrolls content up.',
+      {..._finder, 'dx': Schema.num(), 'dy': Schema.num(), ..._settle},
+      required: const ['finder', 'dx', 'dy'],
+      shots: true,
+    );
+    _forward(
+      CommandMethod.fling,
+      'Fling the matched widget.',
+      {
+        ..._finder,
+        'dx': Schema.num(),
+        'dy': Schema.num(),
+        'speed': Schema.num(),
+        ..._settle,
+      },
+      required: const ['finder', 'dx', 'dy'],
+      shots: true,
+    );
+    _forward(
+      CommandMethod.scrollUntilVisible,
+      'Scroll a scrollable until the target widget is built and visible.',
+      {
+        ..._finder,
+        'scrollable': _finderSchema(
+          description: 'Scrollable to drag (default: first Scrollable)',
+        ),
+        'delta': Schema.num(
+          description:
+              'Vertical drag per step in px; negative reveals items below (default -200)',
+        ),
+        'dx': Schema.num(description: 'Horizontal drag per step'),
+        'maxScrolls': _integer(),
+        ..._settle,
+      },
+      timeout: const Duration(minutes: 2),
+      shots: true,
+    );
+    _forward(
+      CommandMethod.pressBack,
+      'Simulate the system back button / pop route.',
+      {},
+      shots: true,
+    );
+    _forward(
+      CommandMethod.sendKey,
+      'Send a keyboard key.',
+      {
+        'key': UntitledSingleSelectEnumSchema(
+          values: const [
+            'enter',
+            'tab',
+            'escape',
+            'backspace',
+            'space',
+            'arrowUp',
+            'arrowDown',
+            'arrowLeft',
+            'arrowRight',
+          ],
+        ),
+        ..._settle,
+      },
+      required: const ['key'],
+      shots: true,
+    );
+    _forward(CommandMethod.pump, 'Advance the frame clock by N ms.', {
+      'ms': _integer(),
+    });
+    _forward(
+      CommandMethod.pumpAndSettle,
+      'Pump until no animation is running; errors on endless animations.',
+      {'timeoutMs': _integer()},
+    );
+
+    _forward(
+      CommandMethod.waitFor,
+      'Wait until a widget appears (or disappears with absent=true).',
+      {
+        ..._finder,
+        'absent': Schema.bool(),
+        'timeoutMs': _integer(description: 'default 10000'),
+      },
+      timeout: const Duration(minutes: 10),
+      shots: true,
+    );
+    _forward(
+      CommandMethod.expect,
+      'Record an assertion (integration_test `expect`). Failures do not stop the '
+      'session; they are listed by test_results and fail the test run on app_stop.',
+      {
+        ..._finder,
+        'exists': Schema.bool(description: 'Default: must exist'),
+        'count': _integer(description: 'Exact number of matches'),
+        'text': Schema.string(description: 'Text the widget must contain'),
+      },
+    );
+    _forward(
+      CommandMethod.results,
+      'Passed/failed expectation totals and failure messages.',
+      {},
+      name: 'test_results',
+    );
+  }
+
+  void _tool(
+    String name,
+    String description,
+    Map<String, Schema> fields,
+    FutureOr<CallToolResult> Function(Map<String, Object?>) run, {
+    List<String> required = const [],
+    bool shots = false,
+  }) {
+    final schema = Schema.object(
+      properties: {...fields, if (shots) ..._shotFields},
+      required: required.isEmpty ? null : required,
+    );
+    registerTool(
+      Tool(name: name, description: description, inputSchema: schema),
+      (request) async {
+        final args = _knownArguments(schema, request.arguments ?? const {});
+        final errors = schema.validate(args);
+        if (errors.isNotEmpty) {
+          return _fail(errors.map((error) => error.toErrorString()).join('\n'));
+        }
+        final path = args.remove('shot') as String?;
+        final withImage = args.remove('shotImage') == true;
+        final app = _client;
+        CallToolResult result;
+        try {
+          result = await run(args);
+        } catch (error) {
+          result = _fail(error);
+        }
+        if (path != null && path.isNotEmpty) {
+          result.content.addAll(await _captureShot(app, path, withImage));
+        }
+        return result;
+      },
+      // The previous server stripped unknown keys, even in nested finders.
+      validateArguments: false,
+    );
+  }
+
+  Map<String, Object?> _knownArguments(
+    ObjectSchema schema,
+    Map<String, Object?> args,
+  ) => {
+    for (final field in schema.properties!.entries)
+      if (args.containsKey(field.key))
+        field.key: switch (args[field.key]) {
+          final Map<String, Object?> value
+              when field.value.type == JsonType.object =>
+            _knownArguments(field.value as ObjectSchema, value),
+          final value => value,
+        },
+  };
+
+  void _forward(
+    CommandMethod method,
+    String description,
+    Map<String, Schema> fields, {
+    String? name,
+    List<String>? required,
+    Duration timeout = const Duration(minutes: 1),
+    bool shots = false,
+  }) {
+    _tool(
+      name ?? method.name,
+      description,
+      fields,
+      (args) async {
+        final body = await _client.call(method, args, timeout);
+        final result = body['result'];
+        return _text(
+          body.containsKey('appExceptions')
+              ? {'result': result, 'appExceptions': body['appExceptions']}
+              : result,
+        );
+      },
+      required:
+          required ??
+          (fields.containsKey('finder') ? const ['finder'] : const []),
+      shots: shots,
+    );
+  }
+
+  Future<CallToolResult> _launch(Map<String, Object?> args) async {
+    if (_stopping != null) {
+      return _fail('The app is stopping. Try app_launch again.');
+    }
+    if (_launching) {
+      return _fail('An app is already launching. Call app_stop first.');
+    }
+    _launching = true;
+    try {
+      return await _startAndWait(args);
+    } finally {
+      _launching = false;
+    }
+  }
+
+  Future<CallToolResult> _startAndWait(Map<String, Object?> args) async {
+    final port = (args['port'] as num?)?.toInt() ?? _defaultPort;
+    final timeoutSec = (args['timeoutSec'] as num?)?.toInt() ?? 600;
+    final command = await _launcher.start(
+      projectDir: args['projectDir'] as String,
+      device: args['device'] as String,
+      target: args['target'] as String? ?? 'integration_test/mcp_test.dart',
+      mode: args['mode'] as String? ?? 'run',
+      port: port,
+      dartDefines: (args['dartDefines'] as List?)?.cast<String>() ?? const [],
+      extraArgs: (args['extraArgs'] as List?)?.cast<String>() ?? const [],
+      adbForward: args['adbForward'] == true,
+    );
+    final client = _launchedClient = _client = AppClient(
+      'http://127.0.0.1:$port',
+    );
+
+    final clock = Stopwatch()..start();
+    while (clock.elapsed < Duration(seconds: timeoutSec)) {
+      if (await client.health()) {
+        return _text({
+          'ready': true,
+          'command': command,
+          'url': client.baseUrl,
+        });
+      }
+      if (_launcher.exit case final exit?) {
+        return _fail(
+          'App process exited early (${jsonEncode(exit)}). Last logs:\n'
+          '${_launcher.recentLogs(25).join('\n')}',
+        );
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    return _fail(
+      'Timed out after ${timeoutSec}s. Last logs:\n'
+      '${_launcher.recentLogs(25).join('\n')}',
+    );
+  }
+
+  Future<CallToolResult> _stopApp() async {
+    if (_stopping case final stopping?) {
+      return stopping;
+    }
+    _stopping = _shutdownApp(_client);
+    try {
+      return await _stopping!;
+    } finally {
+      _stopping = null;
+    }
+  }
+
+  Future<CallToolResult> _shutdownApp(AppClient client) async {
+    Object? expectations;
+    try {
+      final body = await client.call(
+        CommandMethod.shutdown,
+        {},
+        _shutdownTimeout,
+      );
+      expectations = body['result'];
+    } catch (_) {
+      // The app may already have exited.
+    }
+    await _launcher.stop();
+    return _text({
+      'stopped': true,
+      if (expectations != null) 'expectations': expectations,
+    });
+  }
+
+  Future<Map<String, Object?>> _screenshot(
+    AppClient client,
+    Map<String, Object?> params,
+  ) async {
+    final body = await client.call(CommandMethod.screenshot, params);
+    return body['result'] as Map<String, Object?>;
+  }
+
+  Future<List<Content>> _captureShot(
+    AppClient client,
+    String path,
+    bool withImage,
+  ) async {
+    try {
+      final result = await _screenshot(client, {'maxWidth': _shotWidth});
+      final data = result['pngBase64'] as String;
+      await _saveScreenshot(path, data);
+      return [
+        if (withImage) ImageContent(data: data, mimeType: 'image/png'),
+        TextContent(text: 'shot saved $path'),
+      ];
+    } catch (error) {
+      return [TextContent(text: 'shot failed: $error')];
+    }
+  }
+
+  Future<void> _saveScreenshot(String path, String data) async {
+    final file = File(path);
+    await file.parent.create(recursive: true);
+    await file.writeAsBytes(base64Decode(data));
+  }
+
+  Future<CallToolResult> _enterEnv(Map<String, Object?> args) async {
+    final client = _client;
+    final name = args.remove('name') as String;
+    final values = await _readEnv();
+    final value = values[name];
+    if (value == null) {
+      final names = values.isEmpty ? 'none' : values.keys.join(', ');
+      return _fail(
+        'Variable "$name" is not defined in the env file (available names: $names).',
+      );
+    }
+    final body = await client.call(CommandMethod.enterText, {
+      ...args,
+      'text': value,
+    });
+    final result = body['result'] as Map<String, Object?>;
+    return _text({
+      'typed': name,
+      'chars': value.runes.length,
+      'settled': result['settled'],
+    });
+  }
+
+  Future<Map<String, String>> _readEnv() async {
+    final file = _envFile;
+    if (file == null || file.isEmpty) {
+      return {};
+    }
+    final pairs = <String, String>{};
+    for (final raw in await File(file).readAsLines()) {
+      final line = raw.trim();
+      final equals = line.indexOf('=');
+      if (line.startsWith('#') || equals < 1) {
+        continue;
+      }
+      final key = line
+          .substring(0, equals)
+          .trim()
+          .replaceFirst(RegExp(r'^export\s+'), '');
+      var value = line.substring(equals + 1).trim();
+      if ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.length < 2 ? '' : value.substring(1, value.length - 1);
+      }
+      pairs[key] = value;
+    }
+    return pairs;
+  }
+}
+
+CallToolResult _text(Object? value) => CallToolResult(
+  content: [TextContent(text: value is String ? value : _json.convert(value))],
+);
+
+CallToolResult _fail(Object error) => CallToolResult(
+  isError: true,
+  content: [TextContent(text: error is StateError ? error.message : '$error')],
+);

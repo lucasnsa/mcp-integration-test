@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
+import 'command_protocol.dart';
 import 'finder_spec.dart';
 import 'snapshot.dart';
 
@@ -25,45 +26,45 @@ class CommandExecutor {
   int passedExpectations = 0;
 
   Future<Object?> run(String method, Map<String, Object?> p) async {
-    switch (method) {
-      case 'status':
+    switch (CommandMethod.byName[method]) {
+      case CommandMethod.status:
         return _status();
-      case 'snapshot':
+      case CommandMethod.snapshot:
         return {'nodes': buildSnapshot(tester.binding.rootElement!, maxNodes: _int(p, 'maxNodes') ?? 300)};
-      case 'find':
+      case CommandMethod.find:
         return _find(p);
-      case 'getText':
+      case CommandMethod.getText:
         return _getText(p);
-      case 'tap':
+      case CommandMethod.tap:
         return _action(p, (f) => tester.tap(f));
-      case 'longPress':
+      case CommandMethod.longPress:
         return _action(p, (f) => tester.longPress(f));
-      case 'doubleTap':
+      case CommandMethod.doubleTap:
         return _action(p, (f) async {
           await tester.tap(f);
           await tester.pump(kDoubleTapMinTime);
           await tester.tap(f);
         });
-      case 'tapAt':
+      case CommandMethod.tapAt:
         return _tapAt(p);
-      case 'enterText':
+      case CommandMethod.enterText:
         return _enterText(p);
-      case 'drag':
+      case CommandMethod.drag:
         return _action(p, (f) => tester.drag(f, Offset(_num(p, 'dx'), _num(p, 'dy'))));
-      case 'fling':
+      case CommandMethod.fling:
         return _action(p, (f) => tester.fling(f, Offset(_num(p, 'dx'), _num(p, 'dy')), _num(p, 'speed', 1000)));
-      case 'scrollUntilVisible':
+      case CommandMethod.scrollUntilVisible:
         return _scrollUntilVisible(p);
-      case 'pump':
+      case CommandMethod.pump:
         await tester.pump(Duration(milliseconds: _int(p, 'ms') ?? 0));
         return {};
-      case 'pumpAndSettle':
+      case CommandMethod.pumpAndSettle:
         return _settle(timeoutMs: _int(p, 'timeoutMs') ?? 10000, strict: true);
-      case 'waitFor':
+      case CommandMethod.waitFor:
         return _waitFor(p);
-      case 'expect':
+      case CommandMethod.expect:
         return _expect(p);
-      case 'pressBack':
+      case CommandMethod.pressBack:
         final completer = Completer<ByteData?>();
         await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
           'flutter/navigation',
@@ -73,13 +74,14 @@ class CommandExecutor {
         final reply = await completer.future;
         await _settle();
         return {'handled': reply == null ? null : const JSONMethodCodec().decodeEnvelope(reply) == true};
-      case 'sendKey':
+      case CommandMethod.sendKey:
         return _sendKey(p);
-      case 'screenshot':
+      case CommandMethod.screenshot:
         return _screenshot(p);
-      case 'results':
+      case CommandMethod.results:
         return _results();
-      default:
+      case CommandMethod.shutdown:
+      case null:
         throw ArgumentError('Unknown method "$method"');
     }
   }

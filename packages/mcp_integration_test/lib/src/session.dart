@@ -3,12 +3,13 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
+import 'command_protocol.dart';
 import 'executor.dart';
 import 'server.dart';
 
 /// Port the in-app server listens on. Override with
 /// `--dart-define=MCP_IT_PORT=1234`.
-const int _defaultPort = int.fromEnvironment('MCP_IT_PORT', defaultValue: 8765);
+const int _defaultPort = int.fromEnvironment('MCP_IT_PORT', defaultValue: defaultCommandPort);
 
 /// Entry point for an MCP-controlled integration test build.
 ///
@@ -31,8 +32,8 @@ void mcpIntegrationTest(FutureOr<void> Function() appMain, {int port = _defaultP
     await tester.pump();
 
     await for (final command in server.commands) {
-      if (command.method == 'shutdown') {
-        command.complete({'ok': true, 'result': await executor.run('results', {})});
+      if (command.method == CommandMethod.shutdown.name) {
+        command.complete({'ok': true, 'result': await executor.run(CommandMethod.results.name, {})});
         break;
       }
       command.complete(await _execute(executor, tester, command));

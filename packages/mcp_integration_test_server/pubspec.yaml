@@ -1,0 +1,17 @@
+name: mcp_integration_test_server
+description: >
+  MCP server that launches an mcp_integration_test build of a Flutter app and
+  forwards tool calls to its loopback JSON-RPC server.
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  dart_mcp: ^0.5.2
+  # Only for the shared command protocol; nothing Flutter is imported here.
+  mcp_integration_test:
+    path: ../mcp_integration_test
+
+executables:
+  mcp_integration_test_server:

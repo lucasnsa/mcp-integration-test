@@ -1,7 +1,3 @@
-# Node (mcp_server)
-node_modules/
-npm-debug.log*
-
 # Dart / Flutter (packages/*, example/ keeps its own .gitignore too)
 .dart_tool/
 .packages
