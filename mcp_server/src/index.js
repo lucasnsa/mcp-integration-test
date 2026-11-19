@@ -123,17 +123,17 @@ server.registerTool(
       device: z.string().describe('Device id from `flutter devices` (e.g. emulator-5554, linux, <ios simulator id>)'),
       target: z.string().optional().describe('Entry point (default integration_test/mcp_test.dart)'),
       mode: z.enum(['run', 'test']).optional().describe('"run" = flutter run (default); "test" = flutter test (official integration_test flow; non-zero exit when an expect fails)'),
-      port: z.number().int().optional().describe(`In-app server port (default ${DEFAULT_PORT})`),
+      port: z.number().int().min(1).max(65535).optional().describe('In-app server port (automatically selects a free local port when omitted)'),
       dartDefines: z.array(z.string()).optional().describe('Extra --dart-define values, KEY=VALUE'),
       extraArgs: z.array(z.string()).optional().describe('Extra flutter args, e.g. ["--flavor","dev"]'),
       adbForward: z.boolean().optional().describe('Run `adb forward` for the port (needed for Android devices/emulators)'),
       timeoutSec: z.number().int().optional().describe('Max wait for the first build (default 600)'),
     },
   },
-  async ({ projectDir, device, target = 'integration_test/mcp_test.dart', mode = 'run', port = DEFAULT_PORT, dartDefines, extraArgs, adbForward, timeoutSec = 600 }) => {
+  async ({ projectDir, device, target = 'integration_test/mcp_test.dart', mode = 'run', port, dartDefines, extraArgs, adbForward, timeoutSec = 600 }) => {
     try {
-      client = new AppClient(`http://127.0.0.1:${port}`);
       const cmd = await launcher.start({ projectDir, device, target, mode, port, dartDefines, extraArgs, adbForward });
+      client = new AppClient(`http://127.0.0.1:${launcher.port}`);
       const deadline = Date.now() + timeoutSec * 1000;
       while (Date.now() < deadline) {
         if (await client.health()) return text({ ready: true, command: cmd, url: client.baseUrl });
@@ -182,7 +182,11 @@ server.registerTool(
     } catch {
       /* app may already be gone */
     }
-    await launcher.stop();
+    try {
+      await launcher.stop();
+    } catch (error) {
+      return fail(error);
+    }
     return text({ stopped: true, expectations: results });
   },
 );
