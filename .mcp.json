@@ -1,1 +1,8 @@
-{ "mcpServers": { "flutter-it": { "command": "node", "args": ["./mcp_server/src/index.js"] } } }
+{
+  "mcpServers": {
+    "flutter-it": {
+      "command": "dart",
+      "args": ["run", "packages/mcp_integration_test_server/bin/mcp_integration_test_server.dart"]
+    }
+  }
+}
