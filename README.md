@@ -33,10 +33,47 @@ Production builds (`lib/main.dart`) never include it.
 
 ## 2. Register the MCP server
 
+Install the server dependencies first:
+
 ```bash
 cd mcp_server && npm install
+```
+
+### Claude Code
+
+```bash
 claude mcp add flutter-it -- node /path/to/mcp-integration-test/mcp_server/src/index.js
 ```
+
+### Codex
+
+Register the local STDIO server with the Codex CLI, using the absolute path to
+your checkout:
+
+```bash
+codex mcp add flutter-it -- node /path/to/mcp-integration-test/mcp_server/src/index.js
+codex mcp list
+```
+
+Codex stores the entry in `~/.codex/config.toml`. Set `tool_timeout_sec` to
+`660` in that entry so `app_launch` can wait for its default 600-second build
+timeout. Alternatively, add the complete entry directly:
+
+```toml
+[mcp_servers.flutter-it]
+command = "node"
+args = ["/path/to/mcp-integration-test/mcp_server/src/index.js"]
+tool_timeout_sec = 660
+```
+
+You can also use a project-scoped `.codex/config.toml` in a trusted project.
+In the desktop app, open **Settings → MCP servers → Add server**, choose
+**STDIO**, and enter the same command and argument. Save and select **Restart**;
+in the IDE extension, select **Restart extension**. Use `/mcp` in the desktop
+app or Codex CLI to check connected servers.
+
+Ensure `node`, `flutter`, and (for Android) `adb` are available on the MCP
+server's `PATH`. See the [official MCP configuration documentation](https://learn.chatgpt.com/docs/extend/mcp).
 
 ## 3. Use it
 
@@ -48,6 +85,14 @@ flutter test integration_test/mcp_test.dart -d <device>        # official flow
 # Android/emulator: adb forward tcp:8765 tcp:8765   (app_launch does it with adbForward: true)
 ```
 then `app_connect`. Port: `--dart-define=MCP_IT_PORT=1234` (+ `MCP_IT_PORT` env for the server).
+
+`app_launch` automatically selects a free local port when `port` is omitted and
+returns its URL. Pass `port` to request a specific port; an occupied port fails
+before launching Flutter. With `adbForward: true`, `app_stop` removes the ADB
+forward created by that launcher, including when the Flutter process has already
+exited. Separate MCP server sessions can launch apps concurrently on different
+ports. Manually started apps and `app_connect` still default to port 8765 (or
+`MCP_IT_PORT`).
 
 ### Tools
 
