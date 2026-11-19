@@ -80,7 +80,7 @@ function appTool(name, description, shape, method, { map, timeoutMs, shots = fal
 }
 
 function withExceptions(result, body) {
-  return body.appExceptions ? { result, appExceptions: body.appExceptions } : result;
+  return body.appErrors ? { result, appErrors: body.appErrors } : result;
 }
 
 // --- finder ------------------------------------------------------------
@@ -170,13 +170,15 @@ server.registerTool(
 server.registerTool(
   'app_stop',
   {
-    description: 'End the session: reports expectation results, shuts the in-app server down and stops the flutter process.',
-    inputSchema: {},
+    description:
+      'End the session: reports expectation results, shuts the in-app server down and stops the flutter process. ' +
+      'With flutter test mode, unacknowledged app errors (overflow, exceptions) fail the run unless ignoreErrors is true.',
+    inputSchema: { ignoreErrors: z.boolean().optional().describe('Do not fail the run because of recorded app errors') },
   },
-  async () => {
+  async ({ ignoreErrors } = {}) => {
     let results;
     try {
-      results = (await client.call('shutdown', {}, 5000)).result;
+      results = (await client.call('shutdown', { ignoreErrors: ignoreErrors === true }, 5000)).result;
     } catch {
       /* app may already be gone */
     }
@@ -344,6 +346,12 @@ appTool(
     count: z.number().int().optional().describe('Exact number of matches'),
     text: z.string().optional().describe('Text the widget must contain'),
   },
+);
+appTool(
+  'app_errors',
+  'List errors raised inside the app (RenderFlex overflow, build/layout/gesture exceptions) with count, command that triggered them and stack. Also returned as appErrors in any command response when new ones appear.',
+  { clear: z.boolean().optional().describe('Acknowledge and clear them (so they do not fail the run)') },
+  'errors',
 );
 appTool('test_results', 'Passed/failed expectation totals and failure messages.', {}, 'results');
 
