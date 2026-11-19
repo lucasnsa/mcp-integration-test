@@ -144,8 +144,11 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
               '"run" = flutter run (default); "test" = flutter test '
               '(official integration_test flow; non-zero exit when an expect fails)',
         ),
-        'port': _integer(
-          description: 'In-app server port (default $_defaultPort)',
+        'port': Schema.int(
+          minimum: 1,
+          maximum: 65535,
+          description:
+              'In-app server port (automatically selects a free local port when omitted)',
         ),
         'dartDefines': Schema.list(
           items: Schema.string(),
@@ -186,7 +189,7 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
     _tool(
       'app_logs',
       'Last lines of the flutter process output (build errors, app prints).',
-      {'lines': _integer()},
+      {'lines': _integer(minimum: 0)},
       (args) => _text({
         'running': _launcher.running,
         'exit': _launcher.exit,
@@ -196,9 +199,14 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
     _tool(
       'app_stop',
       'End the session: reports expectation results, shuts the in-app server down '
-          'and stops the flutter process.',
-      {},
-      (_) => _stopApp(),
+          'and stops the flutter process. With flutter test mode, unacknowledged '
+          'app errors (overflow, exceptions) fail the run unless ignoreErrors is true.',
+      {
+        'ignoreErrors': Schema.bool(
+          description: 'Do not fail the run because of recorded app errors',
+        ),
+      },
+      (args) => _stopApp(ignoreErrors: args['ignoreErrors'] == true),
     );
 
     _forward(
@@ -400,6 +408,19 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
       },
     );
     _forward(
+      CommandMethod.errors,
+      'List errors raised inside the app (RenderFlex overflow, build/layout/gesture '
+      'exceptions) with count, command that triggered them and stack. Also returned '
+      'as appErrors in any command response when new ones appear.',
+      {
+        'clear': Schema.bool(
+          description:
+              'Acknowledge and clear them (so they do not fail the run)',
+        ),
+      },
+      name: 'app_errors',
+    );
+    _forward(
       CommandMethod.results,
       'Passed/failed expectation totals and failure messages.',
       {},
@@ -477,8 +498,8 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
         final body = await _client.call(method, args, timeout);
         final result = body['result'];
         return _text(
-          body.containsKey('appExceptions')
-              ? {'result': result, 'appExceptions': body['appExceptions']}
+          body.containsKey('appErrors')
+              ? {'result': result, 'appErrors': body['appErrors']}
               : result,
         );
       },
@@ -505,20 +526,19 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
   }
 
   Future<CallToolResult> _startAndWait(Map<String, Object?> args) async {
-    final port = (args['port'] as num?)?.toInt() ?? _defaultPort;
     final timeoutSec = (args['timeoutSec'] as num?)?.toInt() ?? 600;
     final command = await _launcher.start(
       projectDir: args['projectDir'] as String,
       device: args['device'] as String,
       target: args['target'] as String? ?? 'integration_test/mcp_test.dart',
       mode: args['mode'] as String? ?? 'run',
-      port: port,
+      port: (args['port'] as num?)?.toInt(),
       dartDefines: (args['dartDefines'] as List?)?.cast<String>() ?? const [],
       extraArgs: (args['extraArgs'] as List?)?.cast<String>() ?? const [],
       adbForward: args['adbForward'] == true,
     );
     final client = _launchedClient = _client = AppClient(
-      'http://127.0.0.1:$port',
+      'http://127.0.0.1:${_launcher.port}',
     );
 
     final clock = Stopwatch()..start();
@@ -544,11 +564,11 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
     );
   }
 
-  Future<CallToolResult> _stopApp() async {
+  Future<CallToolResult> _stopApp({required bool ignoreErrors}) async {
     if (_stopping case final stopping?) {
       return stopping;
     }
-    _stopping = _shutdownApp(_client);
+    _stopping = _shutdownApp(_client, ignoreErrors: ignoreErrors);
     try {
       return await _stopping!;
     } finally {
@@ -556,19 +576,24 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
     }
   }
 
-  Future<CallToolResult> _shutdownApp(AppClient client) async {
+  Future<CallToolResult> _shutdownApp(
+    AppClient client, {
+    bool ignoreErrors = false,
+  }) async {
     Object? expectations;
     try {
-      final body = await client.call(
-        CommandMethod.shutdown,
-        {},
-        _shutdownTimeout,
-      );
+      final body = await client.call(CommandMethod.shutdown, {
+        'ignoreErrors': ignoreErrors,
+      }, _shutdownTimeout);
       expectations = body['result'];
     } catch (_) {
       // The app may already have exited.
     }
-    await _launcher.stop();
+    try {
+      await _launcher.stop();
+    } catch (error) {
+      return _fail(error);
+    }
     return _text({
       'stopped': true,
       if (expectations != null) 'expectations': expectations,

@@ -3,33 +3,55 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
-/// Owns the Flutter test process and its recent stdout/stderr.
+typedef StartProcess =
+    Future<Process> Function(
+      String executable,
+      List<String> arguments, {
+      String? workingDirectory,
+    });
+typedef RunCommand =
+    Future<ProcessResult> Function(String executable, List<String> arguments);
+
+/// Owns the Flutter test process, its recent stdout/stderr and the ADB
+/// forward created for it.
 class AppLauncher {
+  AppLauncher({
+    StartProcess startProcess = Process.start,
+    RunCommand runCommand = Process.run,
+  }) : _startProcess = startProcess,
+       _runCommand = runCommand;
+
   static const _maxLogLines = 500;
   static const _quitTimeout = Duration(seconds: 5);
 
+  final StartProcess _startProcess;
+  final RunCommand _runCommand;
   final _logs = ListQueue<String>();
   Process? _child;
   bool _testMode = false;
   Future<String>? _starting;
   Future<void>? _finished;
   Future<void>? _stopping;
+  ({String device, int port})? _forward;
   Map<String, Object?>? exit;
+
+  /// Port of the in-app server for the last launch.
+  int? port;
 
   bool get running => _child != null && exit == null;
 
   List<String> recentLogs(int lines) {
-    // Match the old server's logs.slice(-lines), including zero.
-    final start = lines > 0 ? _logs.length - lines : -lines;
+    final start = _logs.length - lines;
     return _logs.skip(start < 0 ? 0 : start).toList();
   }
 
+  /// Starts Flutter on [port], or on a free loopback port when it is null.
   Future<String> start({
     required String projectDir,
     required String device,
     required String target,
     required String mode,
-    required int port,
+    required int? port,
     required List<String> dartDefines,
     required List<String> extraArgs,
     required bool adbForward,
@@ -37,12 +59,14 @@ class AppLauncher {
     if (running || _starting != null || _stopping != null) {
       throw StateError('An app is already running. Call app_stop first.');
     }
+    // Clean up after a process that already exited (e.g. its ADB forward).
+    await stop();
     _starting = _start(
       projectDir: projectDir,
       device: device,
       target: target,
       testMode: mode == 'test',
-      port: port,
+      requestedPort: port,
       dartDefines: dartDefines,
       extraArgs: extraArgs,
       adbForward: adbForward,
@@ -59,22 +83,24 @@ class AppLauncher {
     required String device,
     required String target,
     required bool testMode,
-    required int port,
+    required int? requestedPort,
     required List<String> dartDefines,
     required List<String> extraArgs,
     required bool adbForward,
   }) async {
+    final port = this.port = await selectPort(requestedPort);
     if (adbForward) {
-      final result = await Process.run('adb', [
+      // Do not replace a mapping owned by another session if port selection
+      // races.
+      await _run('adb', [
         '-s',
         device,
         'forward',
+        '--no-rebind',
         'tcp:$port',
         'tcp:$port',
       ]);
-      if (result.exitCode != 0) {
-        throw ProcessException('adb', [], '${result.stderr}', result.exitCode);
-      }
+      _forward = (device: device, port: port);
     }
 
     final defines = [
@@ -102,7 +128,7 @@ class AppLauncher {
     _logs.clear();
     exit = null;
     try {
-      final child = await Process.start(
+      final child = await _startProcess(
         'flutter',
         args,
         workingDirectory: projectDir,
@@ -130,9 +156,37 @@ class AppLauncher {
     } on ProcessException catch (error) {
       exit = {'error': error.message};
       _addLog('[spawn] ${error.message}');
+      await _removeForward();
       rethrow;
     }
     return 'flutter ${args.join(' ')}';
+  }
+
+  Future<void> _run(String executable, List<String> args) async {
+    final result = await _runCommand(executable, args);
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        executable,
+        args,
+        '${result.stderr}'.trim(),
+        result.exitCode,
+      );
+    }
+  }
+
+  Future<void> _removeForward() async {
+    final forward = _forward;
+    if (forward == null) {
+      return;
+    }
+    await _run('adb', [
+      '-s',
+      forward.device,
+      'forward',
+      '--remove',
+      'tcp:${forward.port}',
+    ]);
+    _forward = null;
   }
 
   Future<void> _readLogs(Stream<List<int>> stream, String tag) async {
@@ -153,6 +207,9 @@ class AppLauncher {
     _logs.addLast(line);
   }
 
+  /// Stops the process and removes its ADB forward, even when the process
+  /// already exited. A failed removal is rethrown and retried on the next
+  /// call.
   Future<void> stop() async {
     if (_stopping case final stopping?) {
       return stopping;
@@ -168,9 +225,17 @@ class AppLauncher {
   Future<void> _stop() async {
     try {
       await _starting;
-    } on ProcessException {
-      return; // The launch call reports the failure.
+    } catch (_) {
+      // The launch call reports the failure.
     }
+    try {
+      await _stopProcess();
+    } finally {
+      await _removeForward();
+    }
+  }
+
+  Future<void> _stopProcess() async {
     final child = _child;
     final finished = _finished;
     if (child == null || finished == null) {
@@ -202,4 +267,24 @@ class AppLauncher {
       _finished = null;
     }
   }
+}
+
+/// Returns a free loopback port, or checks that [port] is free.
+Future<int> selectPort(int? port) async {
+  if (port != null && (port < 1 || port > 65535)) {
+    throw ArgumentError('Port must be an integer between 1 and 65535.');
+  }
+  final ServerSocket socket;
+  try {
+    socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, port ?? 0);
+  } on SocketException catch (error) {
+    throw StateError(
+      'Cannot use local port ${port ?? '(automatically selected)'} '
+      '(${error.osError?.message ?? error.message}). '
+      'Choose another port or omit port to select a free one.',
+    );
+  }
+  final selected = socket.port;
+  await socket.close();
+  return selected;
 }

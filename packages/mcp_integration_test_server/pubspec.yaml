@@ -15,3 +15,6 @@ dependencies:
 
 executables:
   mcp_integration_test_server:
+
+dev_dependencies:
+  test: ^1.25.0

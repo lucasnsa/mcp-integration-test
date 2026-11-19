@@ -21,6 +21,7 @@ enum CommandMethod {
   pumpAndSettle,
   waitFor,
   expect,
+  errors,
   results,
   shutdown;
 
