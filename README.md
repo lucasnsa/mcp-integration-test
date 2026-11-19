@@ -57,7 +57,7 @@ then `app_connect`. Port: `--dart-define=MCP_IT_PORT=1234` (+ `MCP_IT_PORT` env 
 | Inspect | `app_status`, `snapshot`, `find`, `getText`, `screenshot` |
 | Act | `tap`, `longPress`, `doubleTap`, `tapAt`, `enterText`, `drag`, `fling`, `scrollUntilVisible`, `pressBack`, `sendKey` |
 | Timing | `pump`, `pumpAndSettle`, `waitFor` |
-| Assert | `expect`, `test_results` |
+| Assert | `expect`, `test_results`, `app_errors` |
 
 Finders: `{text | textContaining | key | type | tooltip | semanticsLabel, index, within, includeOffstage}`.
 Actions pump and wait for animations by default (never fails on endless animations).
@@ -71,5 +71,9 @@ Actions pump and wait for animations by default (never fails on endless animatio
 - Needs `dart:io`: mobile and desktop, **not Flutter web**.
 - Server binds to loopback only and rejects requests with an `Origin` header or a non-JSON content type.
 - Screenshots use the render layer (debug/profile builds), so they work on every platform without the native plugin.
-- Unexpected framework exceptions are returned as `appExceptions` instead of killing the session.
+- App errors (RenderFlex overflow, build/layout/paint exceptions, errors thrown in gesture callbacks) are collected with
+  kind, count, triggering command and stack, and returned as `appErrors` in the response of the command that caused them
+  (also via `app_errors`). They don't kill the session, but they **fail the test at `app_stop`** unless acknowledged with
+  `app_errors {clear: true}` or `app_stop {ignoreErrors: true}`, like the official `integration_test`.
+  Overflow is only reported by debug builds. Errors thrown from async code outside the framework's error zone are not captured yet.
 - Verified here only headless (`flutter test` under `flutter_tester`); this machine has no `cmake`, so Linux desktop/Android were not run.

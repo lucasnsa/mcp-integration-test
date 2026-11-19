@@ -10,15 +10,17 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
+import 'errors.dart';
 import 'finder_spec.dart';
 import 'snapshot.dart';
 
 /// Executes client commands against a [WidgetTester].
 class CommandExecutor {
-  CommandExecutor(this.tester, this.binding);
+  CommandExecutor(this.tester, this.binding, this.errors);
 
   final WidgetTester tester;
   final IntegrationTestWidgetsFlutterBinding binding;
+  final ErrorCollector errors;
 
   /// Failed `expect` calls; make the underlying test fail at shutdown.
   final List<String> failedExpectations = [];
@@ -77,6 +79,10 @@ class CommandExecutor {
         return _sendKey(p);
       case 'screenshot':
         return _screenshot(p);
+      case 'errors':
+        final list = errors.all.map((e) => e.toJson()).toList();
+        if (p['clear'] == true) errors.clear();
+        return {'errors': list};
       case 'results':
         return _results();
       default:
@@ -94,6 +100,7 @@ class CommandExecutor {
       'devicePixelRatio': view.devicePixelRatio,
       'hasRoot': tester.binding.rootElement != null,
       'expectations': {'passed': passedExpectations, 'failed': failedExpectations.length},
+      'appErrors': errors.all.length,
     };
   }
 
@@ -245,6 +252,7 @@ class CommandExecutor {
         'passed': passedExpectations,
         'failed': failedExpectations.length,
         'failures': failedExpectations,
+        'appErrors': errors.all.map((e) => e.toJson()).toList(),
       };
 
   // --- screenshot ------------------------------------------------------

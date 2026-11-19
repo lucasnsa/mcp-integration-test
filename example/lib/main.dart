@@ -46,6 +46,11 @@ class _LoginPageState extends State<LoginPage> {
             ),
             const SizedBox(height: 16),
             FilledButton(key: const ValueKey('login'), onPressed: _submit, child: const Text('Sign in')),
+            TextButton(
+              key: const ValueKey('errors-demo'),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ErrorsDemoPage())),
+              child: const Text('Errors demo'),
+            ),
           ]),
         ),
       );
@@ -62,5 +67,24 @@ class ItemsPage extends StatelessWidget {
           itemCount: 100,
           itemBuilder: (_, i) => ListTile(title: Text('Item $i'), onTap: () {}),
         ),
+      );
+}
+
+/// Triggers the kinds of errors the MCP session reports as `appErrors`.
+class ErrorsDemoPage extends StatelessWidget {
+  const ErrorsDemoPage({super.key});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Errors demo')),
+        body: Column(children: [
+          // RenderFlex overflow: wider than the screen.
+          const Row(children: [Text('This row is intentionally far too wide to fit on a phone screen at all')]),
+          FilledButton(
+            key: const ValueKey('throw'),
+            onPressed: () => throw StateError('boom from onPressed'),
+            child: const Text('Throw in callback'),
+          ),
+        ]),
       );
 }
