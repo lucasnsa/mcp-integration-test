@@ -39,11 +39,14 @@ jobs:
           (cd packages/mcp_integration_test_server && dart pub get)
           (cd example && flutter pub get)
 
+      # Errors and warnings fail the build. Infos don't: newer stable releases
+      # deprecate `package:flutter/material.dart` in favor of `material_ui`, which
+      # the minimum supported version (3.35.0) doesn't have yet.
       - name: Analyze
         run: |
-          (cd packages/mcp_integration_test && flutter analyze)
+          (cd packages/mcp_integration_test && flutter analyze --no-fatal-infos)
           (cd packages/mcp_integration_test_server && dart analyze --fatal-infos)
-          (cd example && flutter analyze)
+          (cd example && flutter analyze --no-fatal-infos)
 
       - name: Check formatting (MCP server)
         working-directory: packages/mcp_integration_test_server
