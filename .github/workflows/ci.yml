@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux · Flutter ${{ matrix.flutter.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        flutter:
+          # Minimum supported version (README) and the latest stable.
+          - { name: "3.35.0", version: "3.35.0" }
+          - { name: stable, version: "" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ matrix.flutter.version }}
+          cache: true
+
+      - name: Get dependencies
+        run: |
+          (cd packages/mcp_integration_test && flutter pub get)
+          (cd packages/mcp_integration_test_server && dart pub get)
+          (cd example && flutter pub get)
+
+      - name: Analyze
+        run: |
+          (cd packages/mcp_integration_test && flutter analyze)
+          (cd packages/mcp_integration_test_server && dart analyze --fatal-infos)
+          (cd example && flutter analyze)
+
+      - name: Check formatting (MCP server)
+        working-directory: packages/mcp_integration_test_server
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Test the in-app package
+        working-directory: packages/mcp_integration_test
+        run: flutter test
+
+      - name: Test the MCP server
+        working-directory: packages/mcp_integration_test_server
+        run: dart test
+
+      - name: End-to-end session on the example app
+        working-directory: packages/mcp_integration_test_server
+        run: dart test -P e2e -r expanded
+
+  windows:
+    name: Windows · MCP server
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get dependencies
+        shell: bash
+        run: |
+          (cd packages/mcp_integration_test_server && dart pub get)
+          (cd example && flutter pub get)
+
+      - name: Test the MCP server
+        working-directory: packages/mcp_integration_test_server
+        run: dart test
+
+      # Launches `flutter` (a batch file on Windows) through app_launch.
+      - name: End-to-end session on the example app
+        working-directory: packages/mcp_integration_test_server
+        run: dart test -P e2e -r expanded
