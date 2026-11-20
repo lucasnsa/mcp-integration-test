@@ -18,3 +18,7 @@ packages/*/pubspec.lock
 # Claude Code local state
 .claude/settings.local.json
 graphify-out/
+
+# FVM Version Cache
+.fvm/
+.fvmrc
