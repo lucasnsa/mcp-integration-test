@@ -1,0 +1,14 @@
+tags:
+  # Drives the example app headless through the real MCP server. Needs `flutter`
+  # on PATH and takes a few minutes on the first build.
+  e2e:
+    timeout: 15m
+    skip: "End-to-end session; run with `dart test -P e2e`."
+
+presets:
+  # `dart test -P e2e` runs only the end-to-end session.
+  e2e:
+    include_tags: e2e
+    tags:
+      e2e:
+        skip: false
