@@ -17,11 +17,14 @@ import 'snapshot.dart';
 
 /// Executes client commands against a [WidgetTester].
 class CommandExecutor {
-  CommandExecutor(this.tester, this.binding, this.errors);
+  CommandExecutor(this.tester, this.binding, this.errors, this.appMain);
 
   final WidgetTester tester;
   final IntegrationTestWidgetsFlutterBinding binding;
   final ErrorCollector errors;
+
+  /// The app's entry point; `restart` runs it again on a fresh widget tree.
+  final FutureOr<void> Function() appMain;
 
   /// Failed `expect` calls; make the underlying test fail at shutdown.
   final List<String> failedExpectations = [];
@@ -86,6 +89,8 @@ class CommandExecutor {
         return {'errors': list};
       case CommandMethod.results:
         return _results();
+      case CommandMethod.restart:
+        return _restart();
       case CommandMethod.shutdown:
       case null:
         throw ArgumentError('Unknown method "$method"');
@@ -256,6 +261,18 @@ class CommandExecutor {
         'failures': failedExpectations,
         'appErrors': errors.all.map((e) => e.toJson()).toList(),
       };
+
+  // --- restart ---------------------------------------------------------
+
+  /// Soft restart: unmounts the whole tree (every State, route and controller is
+  /// disposed) and runs the app's main again. Expectation counters are kept.
+  Future<Map<String, Object?>> _restart() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await appMain();
+    // runApp attaches the new root asynchronously, so pump until it settles.
+    return {'restarted': true, 'kind': 'soft', ...await _settle(timeoutMs: 5000)};
+  }
 
   // --- screenshot ------------------------------------------------------
 

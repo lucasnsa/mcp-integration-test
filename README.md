@@ -118,7 +118,7 @@ ports. Manually started apps and `app_connect` still default to port 8765 (or
 
 | Group | Tools |
 |---|---|
-| Lifecycle | `app_launch`, `app_connect`, `app_logs`, `app_stop` |
+| Lifecycle | `app_launch`, `app_connect`, `app_restart`, `app_logs`, `app_stop` |
 | Inspect | `app_status`, `snapshot`, `find`, `getText`, `screenshot` |
 | Act | `tap`, `longPress`, `doubleTap`, `tapAt`, `enterText`, `enterEnv`, `drag`, `fling`, `scrollUntilVisible`, `pressBack`, `sendKey` |
 | Test data | `envKeys` |
@@ -130,6 +130,19 @@ Actions pump and wait for animations by default (never fails on endless animatio
 
 `expect` failures don't end the session; `app_stop` ends the test, so with
 `mode: "test"` the process exits non-zero, like a normal integration test.
+
+`app_restart` puts the app back on its initial screen with fresh state, so leftovers from a previous run
+(a filled field, a pushed route) don't leak into the next one:
+
+- App started by `app_launch` with `mode: "run"`: **hot restart** (`R` on `flutter run`). Everything is reset,
+  static and global state included.
+- `mode: "test"` or `app_connect`: **soft restart**. The widget tree is unmounted (every State, route and controller is
+  disposed) and the app's `main()` runs again. Static fields, singletons (e.g. `get_it`), a global router and state
+  restoration are **not** reset; if `main()` can't run twice, the restart fails and the screen stays empty.
+- Expectation counters are **preserved** in both cases: `test_results`, `app_status` and `app_stop` include what was
+  recorded before the restart. Unacknowledged app errors are lost on a hot restart (check `app_errors` first).
+- In `mode: "run"` the in-app test only sees failures recorded after the last hot restart; `app_stop` reports them all.
+  A manual `R` in a terminal (with `app_connect`) loses the earlier counters.
 
 ## Notes / limits
 

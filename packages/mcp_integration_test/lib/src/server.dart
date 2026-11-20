@@ -19,7 +19,7 @@ class PendingCommand {
 
 /// Loopback-only HTTP server.
 ///
-/// * `GET  /health` -> `{"ok": true}`
+/// * `GET  /health` -> `{"ok": true, "bootId": "..."}`
 /// * `POST /rpc`    -> body `{"method": "...", "params": {...}}`
 ///
 /// Commands are queued and executed one at a time by the test body.
@@ -27,15 +27,29 @@ class CommandServer {
   CommandServer(this.port);
 
   final int port;
+
+  /// Changes on every boot (hot restart), so clients can tell a new isolate is up.
+  final String bootId = '$pid-${DateTime.now().microsecondsSinceEpoch}';
   HttpServer? _server;
   final StreamController<PendingCommand> _commands = StreamController();
 
   Stream<PendingCommand> get commands => _commands.stream;
 
   Future<void> start() async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
-    _server = server;
-    server.listen(_handle);
+    // After a hot restart the old isolate may still hold the port for a moment.
+    for (var attempt = 1;; attempt++) {
+      try {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+        _server = server;
+        server.listen(_handle);
+        return;
+      } on SocketException catch (e) {
+        if (attempt >= 50) rethrow;
+        // ignore: avoid_print
+        print('MCP_INTEGRATION_TEST bind retry $attempt: ${e.message}');
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+    }
   }
 
   Future<void> close() async {
@@ -52,7 +66,7 @@ class CommandServer {
         return _send(response, HttpStatus.forbidden, {'ok': false, 'error': 'Origin not allowed'});
       }
       if (request.method == 'GET' && request.uri.path == '/health') {
-        return _send(response, HttpStatus.ok, {'ok': true});
+        return _send(response, HttpStatus.ok, {'ok': true, 'bootId': bootId});
       }
       if (request.method != 'POST' || request.uri.path != '/rpc') {
         return _send(response, HttpStatus.notFound, {'ok': false, 'error': 'Not found'});
