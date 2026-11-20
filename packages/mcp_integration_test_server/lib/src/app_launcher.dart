@@ -16,7 +16,7 @@ typedef RunCommand =
 /// forward created for it.
 class AppLauncher {
   AppLauncher({
-    StartProcess startProcess = Process.start,
+    StartProcess startProcess = _startFlutter,
     RunCommand runCommand = Process.run,
   }) : _startProcess = startProcess,
        _runCommand = runCommand;
@@ -283,6 +283,18 @@ class AppLauncher {
     }
   }
 }
+
+/// On Windows `flutter` is a batch file, which only a shell can start.
+Future<Process> _startFlutter(
+  String executable,
+  List<String> arguments, {
+  String? workingDirectory,
+}) => Process.start(
+  executable,
+  arguments,
+  workingDirectory: workingDirectory,
+  runInShell: Platform.isWindows,
+);
 
 /// Returns a free loopback port, or checks that [port] is free.
 Future<int> selectPort(int? port) async {
