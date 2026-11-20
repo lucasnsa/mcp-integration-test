@@ -52,8 +52,10 @@ class CommandServer {
     }
   }
 
+  /// Stops accepting connections but lets in-flight responses (e.g. the
+  /// shutdown reply, completed just before this call) reach the client.
   Future<void> close() async {
-    await _server?.close(force: true);
+    await _server?.close();
     await _commands.close();
   }
 

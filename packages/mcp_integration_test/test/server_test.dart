@@ -48,6 +48,27 @@ void main() {
     expect(secondHealth['bootId'], isNot(firstHealth['bootId']));
   });
 
+  test('close() right after completing a command still delivers its response', () async {
+    final port = await _freePort();
+    final server = CommandServer(port);
+    // Like the session's shutdown: answer, then close the server at once.
+    server.commands.listen((command) {
+      command.complete({'ok': true, 'result': 'bye'});
+      server.close();
+    });
+    await server.start();
+
+    final client = HttpClient();
+    addTearDown(() => client.close(force: true));
+    final request = await client.post('127.0.0.1', port, '/rpc');
+    request.headers.contentType = ContentType.json;
+    request.write(jsonEncode({'method': 'shutdown', 'params': {}}));
+    final response = await request.close();
+    final body = jsonDecode(await utf8.decoder.bind(response).join()) as Map;
+
+    expect(body['result'], 'bye');
+  });
+
   test('start() retries until the port is released', () async {
     final port = await _freePort();
     final holder = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
