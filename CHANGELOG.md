@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+* Feat: Record a session with `recording_start` / `recording_stop` and write it as a plain `integration_test` file with `export_test`, so agent-driven sessions become regression tests that run with `flutter test` in CI ([#5](https://github.com/lucasnsa/mcp-integration-test/issues/5)) by [@vilar95](https://github.com/vilar95)
 * Feat: New `app_restart` tool resets the app to its initial screen; hot restart with `mode: "run"`, soft restart with `mode: "test"` or `app_connect`, expectation counters preserved ([#3](https://github.com/lucasnsa/mcp-integration-test/issues/3), [c399b70](https://github.com/lucasnsa/mcp-integration-test/commit/c399b70)) by [@vilar95](https://github.com/vilar95)
 * Fix: `app_launch` starts Flutter on Windows, where `flutter` is a batch file ([dfd4959](https://github.com/lucasnsa/mcp-integration-test/commit/dfd4959)) by [@vilar95](https://github.com/vilar95)
 * Fix: `app_stop` returns the expectation results; the in-app server closed the connection before the `shutdown` reply ([1be9d19](https://github.com/lucasnsa/mcp-integration-test/commit/1be9d19)) by [@vilar95](https://github.com/vilar95)
