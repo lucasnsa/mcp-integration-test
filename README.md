@@ -222,3 +222,9 @@ cd packages/mcp_integration_test_server && dart test -P e2e
 
 CI (GitHub Actions) runs analysis, the tests above and the end-to-end session on Linux with Flutter 3.35.0 and
 stable, and the MCP server tests plus the end-to-end session on Windows.
+
+## Authors
+
+| [Lucas Náiade](https://github.com/lucasnsa) | [Kauê Martins](https://github.com/kmartins) | [Eduardo Vilar](https://github.com/vilar95) |
+| :---: | :---: | :---: |
+| [<img src="https://avatars.githubusercontent.com/u/1696686?v=4&amp;s=160" width="80" height="80" alt="Foto de Lucas Náiade">](https://github.com/lucasnsa) | [<img src="https://avatars.githubusercontent.com/u/10598983?v=4&amp;s=160" width="80" height="80" alt="Foto de Kauê Martins">](https://github.com/kmartins) | [<img src="https://avatars.githubusercontent.com/u/97699470?v=4&amp;s=160" width="80" height="80" alt="Foto de Eduardo Vilar">](https://github.com/vilar95) |
