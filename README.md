@@ -1,3 +1,5 @@
+![MCP integration test — Integration tests, with an agent.](docs/assets/banner.png)
+
 # mcp-integration-test
 
 A variant of Flutter's [`integration_test`](https://docs.flutter.dev/testing/integration-tests)
@@ -11,6 +13,12 @@ MCP client (Claude)  --stdio-->  mcp_integration_test_server  --HTTP 127.0.0.1:8
                                        |                                                     WidgetTester + finders
                                        +-- starts the app with `flutter run` or `flutter test`
 ```
+
+## Demo
+
+[![Watch the MCP demo running on an Android emulator](docs/assets/demo-preview.png)](docs/assets/demo.webm)
+
+[▶ Watch the full demo (40 seconds, WebM)](docs/assets/demo.webm)
 
 ## 1. Add to your app
 
