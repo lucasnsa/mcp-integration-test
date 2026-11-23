@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:mcp_integration_test/command_protocol.dart';
+import 'package:mcp_integration_test_protocol/mcp_integration_test_protocol.dart';
 
 /// Talks to the HTTP server embedded in the running test.
 class AppClient {
