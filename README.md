@@ -191,3 +191,9 @@ The example remains unpublished and uses the local Flutter package.
   (also via `app_errors`). They don't kill the session, but they **fail the test at `app_stop`** unless acknowledged with
   `app_errors {clear: true}` or `app_stop {ignoreErrors: true}`, like the official `integration_test`.
   Overflow is only reported by debug builds. Errors thrown from async code outside the framework's error zone are not captured yet.
+
+## Authors
+
+| [Lucas Náiade](https://github.com/lucasnsa) | [Kauê Martins](https://github.com/kmartins) | [Eduardo Vilar](https://github.com/vilar95) |
+| :---: | :---: | :---: |
+| [<img src="https://avatars.githubusercontent.com/u/1696686?v=4&amp;s=160" width="80" height="80" alt="Foto de Lucas Náiade">](https://github.com/lucasnsa) | [<img src="https://avatars.githubusercontent.com/u/10598983?v=4&amp;s=160" width="80" height="80" alt="Foto de Kauê Martins">](https://github.com/kmartins) | [<img src="https://avatars.githubusercontent.com/u/97699470?v=4&amp;s=160" width="80" height="80" alt="Foto de Eduardo Vilar">](https://github.com/vilar95) |
