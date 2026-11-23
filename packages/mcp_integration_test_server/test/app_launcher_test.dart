@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:mcp_integration_test_server/src/app_launcher.dart';
@@ -11,11 +12,12 @@ Future<String> _start(
   String device = _device,
   int? port,
   bool adbForward = true,
+  String mode = 'run',
 }) => launcher.start(
   projectDir: Directory.systemTemp.path,
   device: device,
   target: 'integration_test/mcp_test.dart',
-  mode: 'run',
+  mode: mode,
   port: port,
   dartDefines: const [],
   extraArgs: const [],
@@ -69,11 +71,12 @@ class _Fixture {
   final children = <_FakeProcess>[];
 }
 
-/// Exits with code 0 as soon as anything is written to stdin (`q`).
+/// Records stdin and exits with code 0 when `q` is written to it.
 class _FakeProcess implements Process {
   _FakeProcess(this.arguments);
 
   final List<String> arguments;
+  final written = StringBuffer();
   final _exit = Completer<int>();
   final _stdout = StreamController<List<int>>();
   final _stderr = StreamController<List<int>>();
@@ -114,8 +117,13 @@ class _StdinConsumer implements StreamConsumer<List<int>> {
   final _FakeProcess process;
 
   @override
-  Future<void> addStream(Stream<List<int>> stream) =>
-      stream.forEach((_) => scheduleMicrotask(() => process.finish(0)));
+  Future<void> addStream(Stream<List<int>> stream) => stream.forEach((data) {
+    final text = utf8.decode(data);
+    process.written.write(text);
+    if (text.contains('q')) {
+      scheduleMicrotask(() => process.finish(0));
+    }
+  });
 
   @override
   Future<void> close() async {}
@@ -246,4 +254,33 @@ void main() {
     expect(f.calls, hasLength(1));
     await f.launcher.stop();
   });
+
+  test('hotRestart sends R to flutter run', () async {
+    final f = _Fixture();
+    await _start(f.launcher);
+    expect(f.launcher.canHotRestart, isTrue);
+    await f.launcher.hotRestart();
+    expect(f.children.single.written.toString(), 'R');
+    expect(f.launcher.running, isTrue);
+    await f.launcher.stop();
+  });
+
+  test(
+    'hotRestart is refused in test mode and after the process exits',
+    () async {
+      final f = _Fixture();
+      await _start(f.launcher, mode: 'test');
+      expect(f.launcher.canHotRestart, isFalse);
+      await expectLater(f.launcher.hotRestart(), throwsA(isA<StateError>()));
+      f.children.single.finish(0);
+      await f.launcher.stop();
+
+      await _start(f.launcher);
+      f.children.last.finish(1);
+      await pumpEventQueue();
+      expect(f.launcher.canHotRestart, isFalse);
+      await expectLater(f.launcher.hotRestart(), throwsA(isA<StateError>()));
+      await f.launcher.stop();
+    },
+  );
 }

@@ -109,6 +109,9 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
   bool _launching = false;
   Future<CallToolResult>? _stopping;
 
+  /// Expectations recorded before hot restarts (lost with the old isolate).
+  var _carried = (passed: 0, failures: <String>[]);
+
   /// On MCP disconnect, clean up only a Flutter process we started.
   Future<void> closeApp() async {
     final launchedClient = _launchedClient;
@@ -181,6 +184,7 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
         final host = args['host'] as String? ?? '127.0.0.1';
         final port = (args['port'] as num?)?.toInt() ?? _defaultPort;
         final client = _client = AppClient('http://$host:$port');
+        _carried = (passed: 0, failures: <String>[]);
         return await client.health()
             ? _text({'connected': true, 'url': client.baseUrl})
             : _fail('Nothing answering at ${client.baseUrl}');
@@ -208,12 +212,33 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
       },
       (args) => _stopApp(ignoreErrors: args['ignoreErrors'] == true),
     );
+    _tool(
+      'app_restart',
+      'Reset the app to its initial screen with fresh state. Hot restart when '
+          'it was started by app_launch in mode "run"; otherwise a soft restart '
+          '(widget tree rebuilt and main() re-run; static/global state is kept). '
+          'Expectation counters are preserved.',
+      {
+        'timeoutSec': _integer(
+          minimum: 1,
+          description: 'Max wait for the app to answer again (default 60)',
+        ),
+      },
+      _restart,
+      shots: true,
+    );
 
     _forward(
       CommandMethod.status,
       'Platform, logical screen size, pixel ratio and expectation counters.',
       {},
       name: 'app_status',
+      map: (result) => {
+        ...result,
+        'expectations': _withCarried(
+          result['expectations'] as Map<String, Object?>,
+        ),
+      },
     );
     _forward(
       CommandMethod.snapshot,
@@ -425,6 +450,7 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
       'Passed/failed expectation totals and failure messages.',
       {},
       name: 'test_results',
+      map: _withCarried,
     );
   }
 
@@ -489,6 +515,7 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
     List<String>? required,
     Duration timeout = const Duration(minutes: 1),
     bool shots = false,
+    Map<String, Object?> Function(Map<String, Object?> result)? map,
   }) {
     _tool(
       name ?? method.name,
@@ -496,12 +523,7 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
       fields,
       (args) async {
         final body = await _client.call(method, args, timeout);
-        final result = body['result'];
-        return _text(
-          body.containsKey('appErrors')
-              ? {'result': result, 'appErrors': body['appErrors']}
-              : result,
-        );
+        return _textWithAppErrors(body, map: map);
       },
       required:
           required ??
@@ -540,6 +562,7 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
     final client = _launchedClient = _client = AppClient(
       'http://127.0.0.1:${_launcher.port}',
     );
+    _carried = (passed: 0, failures: <String>[]);
 
     final clock = Stopwatch()..start();
     while (clock.elapsed < Duration(seconds: timeoutSec)) {
@@ -585,7 +608,7 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
       final body = await client.call(CommandMethod.shutdown, {
         'ignoreErrors': ignoreErrors,
       }, _shutdownTimeout);
-      expectations = body['result'];
+      expectations = _withCarried(body['result'] as Map<String, Object?>);
     } catch (_) {
       // The app may already have exited.
     }
@@ -599,6 +622,64 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
       if (expectations != null) 'expectations': expectations,
     });
   }
+
+  Future<CallToolResult> _restart(Map<String, Object?> args) async {
+    if (_stopping != null || _launching) {
+      return _fail('The app is starting or stopping. Try app_restart again.');
+    }
+    final timeout = Duration(
+      seconds: (args['timeoutSec'] as num?)?.toInt() ?? 60,
+    );
+    final client = _client;
+    if (!_launcher.canHotRestart || !identical(client, _launchedClient)) {
+      return _textWithAppErrors(
+        await client.call(CommandMethod.restart, const {}, timeout),
+      );
+    }
+
+    final results =
+        (await client.call(CommandMethod.results))['result']
+            as Map<String, Object?>;
+    final before = await client.bootId();
+    await _launcher.hotRestart();
+    final clock = Stopwatch()..start();
+    while (clock.elapsed < timeout) {
+      final bootId = await client.bootId();
+      if (bootId != null && bootId != before) {
+        // Count them only once the old isolate is gone for sure.
+        _carried = (
+          passed: _carried.passed + (results['passed'] as int),
+          failures: [
+            ..._carried.failures,
+            ...(results['failures'] as List).cast<String>(),
+          ],
+        );
+        // Answers only once main() ran again and the command loop is up.
+        await client.call(CommandMethod.status, const {}, timeout);
+        return _text({'restarted': true, 'kind': 'hot'});
+      }
+      if (_launcher.exit case final exit?) {
+        return _fail(
+          'App process exited during hot restart (${jsonEncode(exit)}). '
+          'Last logs:\n${_launcher.recentLogs(25).join('\n')}',
+        );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    return _fail(
+      'Hot restart timed out after ${timeout.inSeconds}s. Last logs:\n'
+      '${_launcher.recentLogs(25).join('\n')}',
+    );
+  }
+
+  /// Adds [_carried] to expectation totals (and failures, when listed).
+  Map<String, Object?> _withCarried(Map<String, Object?> counts) => {
+    ...counts,
+    'passed': (counts['passed'] as int? ?? 0) + _carried.passed,
+    'failed': (counts['failed'] as int? ?? 0) + _carried.failures.length,
+    if (counts['failures'] case final List failures)
+      'failures': [..._carried.failures, ...failures],
+  };
 
   Future<Map<String, Object?>> _screenshot(
     AppClient client,
@@ -685,6 +766,20 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
 CallToolResult _text(Object? value) => CallToolResult(
   content: [TextContent(text: value is String ? value : _json.convert(value))],
 );
+
+/// The command's result, with `appErrors` alongside when the app reported any.
+CallToolResult _textWithAppErrors(
+  Map<String, Object?> body, {
+  Map<String, Object?> Function(Map<String, Object?> result)? map,
+}) {
+  final raw = body['result'];
+  final result = map != null && raw is Map<String, Object?> ? map(raw) : raw;
+  return _text(
+    body.containsKey('appErrors')
+        ? {'result': result, 'appErrors': body['appErrors']}
+        : result,
+  );
+}
 
 CallToolResult _fail(Object error) => CallToolResult(
   isError: true,

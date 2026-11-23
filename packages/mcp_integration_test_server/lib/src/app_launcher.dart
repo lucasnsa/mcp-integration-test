@@ -16,7 +16,7 @@ typedef RunCommand =
 /// forward created for it.
 class AppLauncher {
   AppLauncher({
-    StartProcess startProcess = Process.start,
+    StartProcess startProcess = _startFlutter,
     RunCommand runCommand = Process.run,
   }) : _startProcess = startProcess,
        _runCommand = runCommand;
@@ -39,6 +39,21 @@ class AppLauncher {
   int? port;
 
   bool get running => _child != null && exit == null;
+
+  /// `flutter run` reads hot restart (`R`) from stdin; `flutter test` does not.
+  bool get canHotRestart => running && !_testMode;
+
+  /// Asks `flutter run` for a hot restart: main() runs again in a new isolate.
+  Future<void> hotRestart() async {
+    if (!canHotRestart) {
+      throw StateError(
+        'Hot restart needs an app started by app_launch in mode "run".',
+      );
+    }
+    final stdin = _child!.stdin;
+    stdin.write('R');
+    await stdin.flush();
+  }
 
   List<String> recentLogs(int lines) {
     final start = _logs.length - lines;
@@ -268,6 +283,18 @@ class AppLauncher {
     }
   }
 }
+
+/// On Windows `flutter` is a batch file, which only a shell can start.
+Future<Process> _startFlutter(
+  String executable,
+  List<String> arguments, {
+  String? workingDirectory,
+}) => Process.start(
+  executable,
+  arguments,
+  workingDirectory: workingDirectory,
+  runInShell: Platform.isWindows,
+);
 
 /// Returns a free loopback port, or checks that [port] is free.
 Future<int> selectPort(int? port) async {

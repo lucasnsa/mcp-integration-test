@@ -18,6 +18,7 @@ const int _defaultPort = int.fromEnvironment('MCP_IT_PORT', defaultValue: defaul
 /// executes commands sent over the local server until a `shutdown` command
 /// arrives. Failed `expect` commands make the test (and therefore
 /// `flutter test` / `flutter drive`) fail, like regular integration tests.
+/// A `restart` command re-runs [appMain] on a fresh widget tree.
 void mcpIntegrationTest(FutureOr<void> Function() appMain, {int port = _defaultPort}) {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
@@ -29,7 +30,7 @@ void mcpIntegrationTest(FutureOr<void> Function() appMain, {int port = _defaultP
     print('MCP_INTEGRATION_TEST_READY port=$port');
 
     final errors = ErrorCollector()..install();
-    final executor = CommandExecutor(tester, binding, errors);
+    final executor = CommandExecutor(tester, binding, errors, appMain);
     var ignoreErrors = false;
     await appMain();
     await tester.pump();

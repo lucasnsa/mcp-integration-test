@@ -23,6 +23,7 @@ enum CommandMethod {
   expect,
   errors,
   results,
+  restart,
   shutdown;
 
   static final byName = values.asNameMap();

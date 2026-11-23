@@ -23,6 +23,21 @@ class AppClient {
     }
   }
 
+  /// Id of the app's current boot; changes after a hot restart. Null when the
+  /// app does not answer.
+  Future<String?> bootId() async {
+    try {
+      final (_, payload) = await _request(
+        'GET',
+        '/health',
+        const Duration(milliseconds: 1500),
+      );
+      return (jsonDecode(payload) as Map<String, Object?>)['bootId'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Map<String, Object?>> call(
     CommandMethod method, [
     Map<String, Object?> params = const {},

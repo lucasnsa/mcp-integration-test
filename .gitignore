@@ -19,5 +19,9 @@ packages/*/pubspec.lock
 .claude/settings.local.json
 graphify-out/
 
+# FVM Version Cache
+.fvm/
+.fvmrc
+
 # Local monorepo dependency overrides
 **/pubspec_overrides.yaml
