@@ -205,6 +205,24 @@ The example remains unpublished and uses the local Flutter package.
   `app_errors {clear: true}` or `app_stop {ignoreErrors: true}`, like the official `integration_test`.
   Overflow is only reported by debug builds. Errors thrown from async code outside the framework's error zone are not captured yet.
 
+## Development
+
+[![CI](https://github.com/lucasnsa/mcp-integration-test/actions/workflows/ci.yml/badge.svg)](https://github.com/lucasnsa/mcp-integration-test/actions/workflows/ci.yml)
+
+```bash
+# In-app package: FinderSpec, snapshot, in-app server, soft restart
+cd packages/mcp_integration_test && flutter test
+
+# MCP server: launcher, app client
+cd packages/mcp_integration_test_server && dart test
+
+# End to end: drives example/ headless (flutter-tester) through the real MCP server
+cd packages/mcp_integration_test_server && dart test -P e2e
+```
+
+CI (GitHub Actions) runs analysis, the tests above and the end-to-end session on Linux with Flutter 3.35.0 and
+stable, and the MCP server tests plus the end-to-end session on Windows.
+
 ## Authors
 
 | [Lucas Náiade](https://github.com/lucasnsa) | [Kauê Martins](https://github.com/kmartins) | [Eduardo Vilar](https://github.com/vilar95) |

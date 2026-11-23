@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux · Flutter ${{ matrix.flutter.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        flutter:
+          # Minimum supported version (README) and the latest stable.
+          - { name: "3.35.0", version: "3.35.0" }
+          - { name: stable, version: "" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ matrix.flutter.version }}
+          cache: true
+
+      # Test the protocol package from this checkout, not the one on pub.dev
+      # (see "Local development" in the README).
+      - name: Use the local protocol package
+        run: |
+          printf 'dependency_overrides:\n  mcp_integration_test_protocol:\n    path: %s\n' ../mcp_integration_test_protocol > packages/mcp_integration_test/pubspec_overrides.yaml
+          printf 'dependency_overrides:\n  mcp_integration_test_protocol:\n    path: %s\n' ../mcp_integration_test_protocol > packages/mcp_integration_test_server/pubspec_overrides.yaml
+          printf 'dependency_overrides:\n  mcp_integration_test_protocol:\n    path: %s\n' ../packages/mcp_integration_test_protocol > example/pubspec_overrides.yaml
+
+      - name: Get dependencies
+        run: |
+          (cd packages/mcp_integration_test && flutter pub get)
+          (cd packages/mcp_integration_test_server && dart pub get)
+          (cd example && flutter pub get)
+
+      # Errors and warnings fail the build. Infos don't: newer stable releases
+      # deprecate `package:flutter/material.dart` in favor of `material_ui`, which
+      # the minimum supported version (3.35.0) doesn't have yet.
+      - name: Analyze
+        run: |
+          (cd packages/mcp_integration_test && flutter analyze --no-fatal-infos)
+          (cd packages/mcp_integration_test_server && dart analyze --fatal-infos)
+          (cd example && flutter analyze --no-fatal-infos)
+
+      - name: Check formatting (MCP server)
+        working-directory: packages/mcp_integration_test_server
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Test the in-app package
+        working-directory: packages/mcp_integration_test
+        run: flutter test
+
+      - name: Test the MCP server
+        working-directory: packages/mcp_integration_test_server
+        run: dart test
+
+      - name: End-to-end session on the example app
+        working-directory: packages/mcp_integration_test_server
+        run: dart test -P e2e -r expanded
+
+  windows:
+    name: Windows · MCP server
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Use the local protocol package
+        shell: bash
+        run: |
+          printf 'dependency_overrides:\n  mcp_integration_test_protocol:\n    path: %s\n' ../mcp_integration_test_protocol > packages/mcp_integration_test/pubspec_overrides.yaml
+          printf 'dependency_overrides:\n  mcp_integration_test_protocol:\n    path: %s\n' ../mcp_integration_test_protocol > packages/mcp_integration_test_server/pubspec_overrides.yaml
+          printf 'dependency_overrides:\n  mcp_integration_test_protocol:\n    path: %s\n' ../packages/mcp_integration_test_protocol > example/pubspec_overrides.yaml
+
+      - name: Get dependencies
+        shell: bash
+        run: |
+          (cd packages/mcp_integration_test_server && dart pub get)
+          (cd example && flutter pub get)
+
+      - name: Test the MCP server
+        working-directory: packages/mcp_integration_test_server
+        run: dart test
+
+      # Launches `flutter` (a batch file on Windows) through app_launch.
+      - name: End-to-end session on the example app
+        working-directory: packages/mcp_integration_test_server
+        run: dart test -P e2e -r expanded

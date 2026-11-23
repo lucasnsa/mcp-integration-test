@@ -5,6 +5,8 @@
 * Fix: `app_launch` starts Flutter on Windows, where `flutter` is a batch file ([dfd4959](https://github.com/lucasnsa/mcp-integration-test/commit/dfd4959)) by [@vilar95](https://github.com/vilar95)
 * Fix: `app_stop` returns the expectation results; the in-app server closed the connection before the `shutdown` reply ([1be9d19](https://github.com/lucasnsa/mcp-integration-test/commit/1be9d19)) by [@vilar95](https://github.com/vilar95)
 * Chore: Ignore FVM files and refresh the example lockfile ([d183c6b](https://github.com/lucasnsa/mcp-integration-test/commit/d183c6b)) by [@vilar95](https://github.com/vilar95)
+* Test: `FinderSpec`, snapshot and `AppClient` tests, and an end-to-end session that drives the example app through the real MCP server ([#4](https://github.com/lucasnsa/mcp-integration-test/issues/4), [732f43a](https://github.com/lucasnsa/mcp-integration-test/commit/732f43a), [d2b261f](https://github.com/lucasnsa/mcp-integration-test/commit/d2b261f)) by [@vilar95](https://github.com/vilar95)
+* Chore: CI on GitHub Actions, Linux with Flutter 3.35.0 and stable plus Windows ([#4](https://github.com/lucasnsa/mcp-integration-test/issues/4), [5a65272](https://github.com/lucasnsa/mcp-integration-test/commit/5a65272)) by [@vilar95](https://github.com/vilar95)
 
 ## 2026-11-19
 * Feat: The MCP server is now a Dart package (`packages/mcp_integration_test_server`) built on `dart_mcp`, replacing the Node server ([#20](https://github.com/lucasnsa/mcp-integration-test/pull/20), [#1](https://github.com/lucasnsa/mcp-integration-test/issues/1)) by [@kmartins](https://github.com/kmartins)
