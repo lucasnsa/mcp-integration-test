@@ -18,7 +18,7 @@ MCP client (Claude)  --stdio-->  mcp_integration_test_server  --HTTP 127.0.0.1:8
 # pubspec.yaml
 dev_dependencies:
   integration_test: { sdk: flutter }
-  mcp_integration_test: { path: /path/to/mcp-integration-test/packages/mcp_integration_test }
+  mcp_integration_test: ^0.1.0
 ```
 
 ```dart
@@ -38,12 +38,11 @@ its dependencies (`dart_mcp`…) never enter your app's dependency graph. Instal
 it once with the Dart from your Flutter SDK:
 
 ```bash
-dart pub global activate --source path /path/to/mcp-integration-test/packages/mcp_integration_test_server
+dart pub global activate mcp_integration_test_server
 ```
 
-A path activation runs from the source, so code changes apply on the next
-start; run the `activate` command again after changing the server's
-`pubspec.yaml`.
+The server depends on a shared pure Dart protocol package and does not depend
+on Flutter packages. Flutter must still be on `PATH` to launch the app.
 
 ### Claude Code
 
@@ -51,9 +50,8 @@ start; run the `activate` command again after changing the server's
 claude mcp add flutter-it -- dart pub global run mcp_integration_test_server
 ```
 
-To use this repository's `.mcp.json` instead, run `flutter pub get` in
-`packages/mcp_integration_test_server`, then open Claude Code at the repository
-root.
+To use this repository's `.mcp.json` instead, activate the server as shown
+above, then open Claude Code at the repository root.
 
 ### Codex
 
@@ -143,6 +141,57 @@ Actions pump and wait for animations by default (never fails on endless animatio
   recorded before the restart. Unacknowledged app errors are lost on a hot restart (check `app_errors` first).
 - In `mode: "run"` the in-app test only sees failures recorded after the last hot restart; `app_stop` reports them all.
   A manual `R` in a terminal (with `app_connect`) loses the earlier counters.
+
+## Local development
+
+Keep hosted version constraints in the published manifests. To use the local
+protocol package, create an ignored `pubspec_overrides.yaml` in both
+`packages/mcp_integration_test` and `packages/mcp_integration_test_server`:
+
+```yaml
+dependency_overrides:
+  mcp_integration_test_protocol:
+    path: ../mcp_integration_test_protocol
+```
+
+Create the same file in `example/`, using
+`path: ../packages/mcp_integration_test_protocol`. Then resolve dependencies:
+
+```bash
+cd packages/mcp_integration_test_protocol
+dart pub get
+cd ../mcp_integration_test
+flutter pub get
+cd ../mcp_integration_test_server
+dart pub get
+dart test
+cd ../../example
+flutter pub get
+```
+
+To run the server from source, use
+`dart run packages/mcp_integration_test_server/bin/mcp_integration_test_server.dart`
+from the repository root. This can also replace the arguments in `.mcp.json`
+with `["run", "packages/mcp_integration_test_server/bin/mcp_integration_test_server.dart"]`.
+
+## Publishing
+
+All three packages start at version `0.1.0`. Publish in dependency order:
+
+1. `packages/mcp_integration_test_protocol`
+2. `packages/mcp_integration_test`
+3. `packages/mcp_integration_test_server`
+
+Before validating a release, remove local `pubspec_overrides.yaml` files
+from the package directories so validation uses hosted dependencies. After
+publishing each dependency, wait until its version resolves from pub.dev before
+validating the next package. Run `dart pub publish --dry-run` in the protocol
+and server directories, and `flutter pub publish --dry-run` in the Flutter
+package directory. Review the included files and validation output, then run
+the corresponding publish command without `--dry-run` when ready.
+
+Restore the local overrides described above to resume local development.
+The example remains unpublished and uses the local Flutter package.
 
 ## Notes / limits
 
