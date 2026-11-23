@@ -3,13 +3,15 @@ description: >
   Variant of Flutter's integration_test that exposes the WidgetTester over a
   local loopback JSON-RPC server, so an MCP server (or any client) can drive
   a special build of your app.
-publish_to: none
+version: 0.1.0
+repository: https://github.com/lucasnsa/mcp-integration-test/tree/master/packages/mcp_integration_test
 
 environment:
   sdk: ^3.9.0
   flutter: ">=3.35.0"
 
 dependencies:
+  mcp_integration_test_protocol: ^0.1.0
   flutter:
     sdk: flutter
   flutter_test:

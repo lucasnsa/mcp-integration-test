@@ -18,3 +18,6 @@ packages/*/pubspec.lock
 # Claude Code local state
 .claude/settings.local.json
 graphify-out/
+
+# Local monorepo dependency overrides
+**/pubspec_overrides.yaml

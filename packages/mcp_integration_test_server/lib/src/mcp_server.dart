@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:dart_mcp/server.dart';
 import 'package:dart_mcp/stdio.dart';
 
-import 'package:mcp_integration_test/command_protocol.dart';
+import 'package:mcp_integration_test_protocol/mcp_integration_test_protocol.dart';
 import 'app_client.dart';
 import 'app_launcher.dart';
 
