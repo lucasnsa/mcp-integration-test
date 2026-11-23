@@ -8,6 +8,8 @@ import 'package:dart_mcp/stdio.dart';
 import 'package:mcp_integration_test_protocol/mcp_integration_test_protocol.dart';
 import 'app_client.dart';
 import 'app_launcher.dart';
+import 'session_recorder.dart';
+import 'test_exporter.dart';
 
 const _json = JsonEncoder.withIndent('  ');
 const _shutdownTimeout = Duration(seconds: 5);
@@ -104,6 +106,9 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
       num.tryParse(Platform.environment['MCP_IT_SHOT_WIDTH'] ?? '') ?? 360;
   final _envFile = Platform.environment['MCP_IT_ENV_FILE'];
   final _launcher = AppLauncher();
+  final _recorder = SessionRecorder();
+  String? _lastProjectDir;
+  String? _lastDevice;
   late AppClient _client;
   AppClient? _launchedClient;
   bool _launching = false;
@@ -224,9 +229,16 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
           description: 'Max wait for the app to answer again (default 60)',
         ),
       },
-      _restart,
+      (args) async {
+        final result = await _restart(args);
+        if (result.isError != true) {
+          _recorder.record('app_restart', const {});
+        }
+        return result;
+      },
       shots: true,
     );
+    _registerRecordingTools();
 
     _forward(
       CommandMethod.status,
@@ -454,6 +466,144 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
     );
   }
 
+  void _registerRecordingTools() {
+    _tool(
+      'recording_start',
+      'Start recording the session: from now on successful actions, waits, '
+          'expectations and app_restart are kept so export_test can turn them '
+          'into a regular integration_test file. Clears any previous recording.',
+      {},
+      (_) {
+        _recorder.start();
+        return _text({'recording': true});
+      },
+    );
+    _tool(
+      'recording_stop',
+      'Stop recording. The recorded steps are kept for export_test.',
+      {},
+      (_) {
+        _recorder.stop();
+        return _text({
+          'recording': false,
+          'steps': _recorder.steps.length,
+          'tools': [for (final step in _recorder.steps) step.tool],
+        });
+      },
+    );
+    _tool(
+      'export_test',
+      'Write the recorded steps as integration_test/<name>_test.dart: one '
+          'testWidgets that replays them with the plain flutter_test API, so '
+          'it runs with `flutter test` in CI without MCP. Expectations that '
+          'failed while recording are left as comments; enterEnv values are '
+          'read with String.fromEnvironment (never written to the file).',
+      {
+        'name': Schema.string(
+          description: 'snake_case file name, e.g. "login_flow"',
+        ),
+        'projectDir': Schema.string(
+          description:
+              'Absolute path of the Flutter project (default: the one from app_launch)',
+        ),
+        'description': Schema.string(
+          description: 'Name of the generated testWidgets (default: name)',
+        ),
+        'imports': Schema.list(
+          items: Schema.string(),
+          description:
+              'Imports for the app setup, optionally prefixed: '
+              '["package:my_app/main.dart as app"] (the default) or '
+              '["test_app.dart"] for a file next to the test',
+        ),
+        'appMain': Schema.string(
+          description:
+              'Dart statements that start the app, like the mcpIntegrationTest '
+              'callback (default "app.main();")',
+        ),
+        'overwrite': Schema.bool(
+          description: 'Replace an existing file (default false)',
+        ),
+      },
+      _exportTest,
+      required: const ['name'],
+    );
+  }
+
+  Future<CallToolResult> _exportTest(Map<String, Object?> args) async {
+    final steps = _recorder.steps;
+    if (steps.isEmpty) {
+      return _fail(
+        'Nothing recorded. Call recording_start, drive the app, then export_test.',
+      );
+    }
+    final name = args['name'] as String;
+    final fileName = testFileName(name);
+    final projectDir = args['projectDir'] as String? ?? _lastProjectDir;
+    if (projectDir == null || projectDir.isEmpty) {
+      return _fail('Pass projectDir: no app was started with app_launch.');
+    }
+    final pubspec = File('$projectDir/pubspec.yaml');
+    if (!await pubspec.exists()) {
+      return _fail('No pubspec.yaml in $projectDir');
+    }
+
+    var imports = (args['imports'] as List?)?.cast<String>();
+    var appMain = args['appMain'] as String?;
+    if (imports == null && appMain == null) {
+      final package = RegExp(
+        r'^name:\s*(\S+)',
+        multiLine: true,
+      ).firstMatch(await pubspec.readAsString())?.group(1);
+      if (package == null) {
+        return _fail('Could not read the package name from ${pubspec.path}');
+      }
+      imports = ['package:$package/main.dart as app'];
+    }
+    final relativePath = 'integration_test/$fileName';
+    final device = _lastDevice ?? '<device>';
+    final source = generateIntegrationTest(
+      steps,
+      ExportOptions(
+        description: args['description'] as String? ?? name,
+        imports: imports ?? const [],
+        appMain: appMain ?? 'app.main();',
+        runCommand: 'flutter test $relativePath -d $device',
+      ),
+    );
+
+    final file = File('$projectDir/$relativePath');
+    if (await file.exists() && args['overwrite'] != true) {
+      return _fail('${file.path} already exists. Pass overwrite: true.');
+    }
+    await file.parent.create(recursive: true);
+    await file.writeAsString(source);
+    final formatted = await _formatDart(file.path);
+    return _text({
+      'path': file.path,
+      'formatted': formatted,
+      'steps': steps.length,
+      'skippedExpectations': steps.where((s) => s.failure != null).length,
+      'run': 'flutter test $relativePath -d $device',
+    });
+  }
+
+  /// Runs `dart format` on [path] with the SDK running this server. Best
+  /// effort: the file is valid Dart either way.
+  Future<bool> _formatDart(String path) async {
+    final dart = Platform.resolvedExecutable;
+    // A compiled server binary is not the Dart SDK: skip rather than run it.
+    if (!RegExp(r'dart(\.exe)?$').hasMatch(dart)) {
+      return false;
+    }
+    try {
+      final result = await Process.run(dart, ['format', path]);
+      return result.exitCode == 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
   void _tool(
     String name,
     String description,
@@ -523,6 +673,14 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
       fields,
       (args) async {
         final body = await _client.call(method, args, timeout);
+        final result = body['result'];
+        _recorder.record(
+          method.name,
+          args,
+          failure: result is Map && result['ok'] == false
+              ? '${result['message']}'
+              : null,
+        );
         return _textWithAppErrors(body, map: map);
       },
       required:
@@ -548,6 +706,8 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
   }
 
   Future<CallToolResult> _startAndWait(Map<String, Object?> args) async {
+    _lastProjectDir = args['projectDir'] as String;
+    _lastDevice = args['device'] as String;
     final timeoutSec = (args['timeoutSec'] as num?)?.toInt() ?? 600;
     final command = await _launcher.start(
       projectDir: args['projectDir'] as String,
@@ -729,6 +889,7 @@ final class IntegrationTestMcpServer extends MCPServer with ToolsSupport {
       'text': value,
     });
     final result = body['result'] as Map<String, Object?>;
+    _recorder.record('enterEnv', {...args, 'name': name});
     return _text({
       'typed': name,
       'chars': value.runes.length,
