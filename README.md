@@ -16,9 +16,9 @@ MCP client (Claude)  --stdio-->  mcp_integration_test_server  --HTTP 127.0.0.1:8
 
 ## Demo
 
-[![Watch the MCP demo running on an Android emulator](docs/assets/demo-preview.png)](docs/assets/demo.webm)
+https://github.com/user-attachments/assets/f8779147-220f-46e6-86ea-dfb46be69d0d
 
-[▶ Watch the full demo (40 seconds, WebM)](docs/assets/demo.webm)
+[Download the demo (40 seconds, WebM)](docs/assets/demo.webm)
 
 ## 1. Add to your app
 
