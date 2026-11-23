@@ -33,6 +33,14 @@ jobs:
           flutter-version: ${{ matrix.flutter.version }}
           cache: true
 
+      # Test the protocol package from this checkout, not the one on pub.dev
+      # (see "Local development" in the README).
+      - name: Use the local protocol package
+        run: |
+          printf 'dependency_overrides:\n  mcp_integration_test_protocol:\n    path: %s\n' ../mcp_integration_test_protocol > packages/mcp_integration_test/pubspec_overrides.yaml
+          printf 'dependency_overrides:\n  mcp_integration_test_protocol:\n    path: %s\n' ../mcp_integration_test_protocol > packages/mcp_integration_test_server/pubspec_overrides.yaml
+          printf 'dependency_overrides:\n  mcp_integration_test_protocol:\n    path: %s\n' ../packages/mcp_integration_test_protocol > example/pubspec_overrides.yaml
+
       - name: Get dependencies
         run: |
           (cd packages/mcp_integration_test && flutter pub get)
@@ -75,6 +83,13 @@ jobs:
         with:
           channel: stable
           cache: true
+
+      - name: Use the local protocol package
+        shell: bash
+        run: |
+          printf 'dependency_overrides:\n  mcp_integration_test_protocol:\n    path: %s\n' ../mcp_integration_test_protocol > packages/mcp_integration_test/pubspec_overrides.yaml
+          printf 'dependency_overrides:\n  mcp_integration_test_protocol:\n    path: %s\n' ../mcp_integration_test_protocol > packages/mcp_integration_test_server/pubspec_overrides.yaml
+          printf 'dependency_overrides:\n  mcp_integration_test_protocol:\n    path: %s\n' ../packages/mcp_integration_test_protocol > example/pubspec_overrides.yaml
 
       - name: Get dependencies
         shell: bash

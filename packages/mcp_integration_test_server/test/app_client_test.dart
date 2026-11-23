@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:mcp_integration_test/command_protocol.dart';
+import 'package:mcp_integration_test_protocol/mcp_integration_test_protocol.dart';
 import 'package:mcp_integration_test_server/src/app_client.dart';
 import 'package:test/test.dart';
 
