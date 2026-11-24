@@ -2,7 +2,7 @@ name: mcp_integration_test_protocol
 description: >
   Shared command names and defaults for the Flutter MCP integration test
   harness and its standalone Dart MCP server.
-version: 0.1.0
+version: 0.2.0
 repository: https://github.com/lucasnsa/mcp-integration-test/tree/master/packages/mcp_integration_test_protocol
 
 environment:

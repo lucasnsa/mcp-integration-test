@@ -26,7 +26,7 @@ https://github.com/user-attachments/assets/f8779147-220f-46e6-86ea-dfb46be69d0d
 # pubspec.yaml
 dev_dependencies:
   integration_test: { sdk: flutter }
-  mcp_integration_test: ^0.1.0
+  mcp_integration_test: ^0.2.0
 ```
 
 ```dart
@@ -212,7 +212,7 @@ with `["run", "packages/mcp_integration_test_server/bin/mcp_integration_test_ser
 
 ## Publishing
 
-All three packages start at version `0.1.0`. Publish in dependency order:
+All three packages are versioned at `0.2.0`. Publish in dependency order:
 
 1. `packages/mcp_integration_test_protocol`
 2. `packages/mcp_integration_test`
