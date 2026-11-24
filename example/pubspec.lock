@@ -261,14 +261,14 @@ packages:
       path: "../packages/mcp_integration_test"
       relative: true
     source: path
-    version: "0.1.0"
+    version: "0.2.0"
   mcp_integration_test_protocol:
     dependency: "direct overridden"
     description:
       path: "../packages/mcp_integration_test_protocol"
       relative: true
     source: path
-    version: "0.1.0"
+    version: "0.2.0"
   meta:
     dependency: transitive
     description:

@@ -10,7 +10,7 @@ check assertions through the companion `mcp_integration_test_server` package.
 dev_dependencies:
   integration_test:
     sdk: flutter
-  mcp_integration_test: ^0.1.0
+  mcp_integration_test: ^0.2.0
 ```
 
 Create `integration_test/mcp_test.dart`, replacing `my_app` with your app package:
