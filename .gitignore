@@ -25,3 +25,6 @@ graphify-out/
 
 # Local monorepo dependency overrides
 **/pubspec_overrides.yaml
+
+# Temporary files
+/tmp

@@ -130,6 +130,7 @@ ports. Manually started apps and `app_connect` still default to port 8765 (or
 | Test data | `envKeys` |
 | Timing | `pump`, `pumpAndSettle`, `waitFor` |
 | Assert | `expect`, `test_results`, `app_errors` |
+| Record | `recording_start`, `recording_stop`, `export_test` |
 
 Finders: `{text | textContaining | key | type | tooltip | semanticsLabel, index, within, includeOffstage}`.
 Actions pump and wait for animations by default (never fails on endless animations).
@@ -149,6 +150,33 @@ Actions pump and wait for animations by default (never fails on endless animatio
   recorded before the restart. Unacknowledged app errors are lost on a hot restart (check `app_errors` first).
 - In `mode: "run"` the in-app test only sees failures recorded after the last hot restart; `app_stop` reports them all.
   A manual `R` in a terminal (with `app_connect`) loses the earlier counters.
+
+### Record a session as a regression test
+
+`recording_start` keeps every successful action, wait, `expect` and `app_restart` until `recording_stop`
+(queries like `snapshot`, `find` or `screenshot` are not recorded). `export_test` then writes
+`integration_test/<name>_test.dart`: one `testWidgets` that replays the steps with the plain `flutter_test` API
+(`find.byKey`, `find.text`, `tester.tap`, `expect(..., findsWidgets)`…), so it runs in CI with
+`flutter test integration_test/<name>_test.dart -d <device>` without MCP.
+
+```text
+recording_start
+enterText {finder: {key: "username"}, text: "eduardo"}
+tap {finder: {key: "login"}}
+expect {finder: {text: "Hello, eduardo"}}
+recording_stop
+export_test {name: "login_flow", imports: ["test_app.dart"], appMain: "startTestApp();"}
+```
+
+- **Starting the app**: by default the test runs `app.main();` from `package:<your app>/main.dart`. When the MCP
+  entry point sets things up first (mocks, DI), move that into a function next to it, call it from
+  `mcpIntegrationTest(...)`, and pass it as `imports` / `appMain` (the example uses `integration_test/demo_app.dart`).
+- `projectDir` defaults to the one given to `app_launch`; an existing file is only replaced with `overwrite: true`.
+- `expect` calls that failed while recording are kept as comments, not replayed.
+- `enterEnv` values are never written: the test reads them with `String.fromEnvironment`, so run it with
+  `--dart-define-from-file=<env file>`.
+- Finders mirror the MCP ones: `key` matches `ValueKey<String>` only; `type` and `semanticsLabel` become
+  `find.byWidgetPredicate`. App errors are not drained like in the MCP session, so an exception fails the exported test.
 
 ## Local development
 
@@ -221,10 +249,11 @@ The example remains unpublished and uses the local Flutter package.
 # In-app package: FinderSpec, snapshot, in-app server, soft restart
 cd packages/mcp_integration_test && flutter test
 
-# MCP server: launcher, app client
+# MCP server: launcher, app client, session recorder, test exporter
 cd packages/mcp_integration_test_server && dart test
 
-# End to end: drives example/ headless (flutter-tester) through the real MCP server
+# End to end: drives example/ headless (flutter-tester) through the real MCP server,
+# then exports the recorded steps and runs the generated test without MCP
 cd packages/mcp_integration_test_server && dart test -P e2e
 ```
 

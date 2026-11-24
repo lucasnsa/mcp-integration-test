@@ -31,7 +31,9 @@ Prepare the target app with the `mcp_integration_test` package, then call
 timeout above the default 600-second launch timeout (for example, 660 seconds).
 
 Tools cover app lifecycle, widget inspection, gestures, text input,
-screenshots, assertions, and collected app errors. This server depends only
+screenshots, assertions, collected app errors, and recording a session
+as a regular `integration_test` file (`recording_start`, `recording_stop`,
+`export_test`). This server depends only
 on Dart packages; Flutter is invoked as an external process.
 
 See the [project documentation](https://github.com/lucasnsa/mcp-integration-test)

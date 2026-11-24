@@ -72,9 +72,10 @@ void main() {
   });
 
   test('a full session on the example app', () async {
+    final exampleDir = Directory('../../example').absolute.path;
     final launch =
         await call('app_launch', {
-              'projectDir': Directory('../../example').absolute.path,
+              'projectDir': exampleDir,
               'device': 'flutter-tester',
               'mode': 'test',
               'timeoutSec': 600,
@@ -88,6 +89,7 @@ void main() {
       containsAll(['login', 'errors-demo']),
     );
 
+    expect(await call('recording_start'), containsPair('recording', true));
     await call('enterText', {
       'finder': {'key': 'username'},
       'text': 'eduardo',
@@ -124,6 +126,18 @@ void main() {
       allOf(containsPair('passed', 1), containsPair('failed', 1)),
     );
 
+    expect(
+      await call('recording_stop'),
+      containsPair('tools', [
+        'enterText',
+        'tap',
+        'expect',
+        'expect',
+        'app_restart',
+      ]),
+      reason: 'queries (snapshot, getText, test_results) are not recorded',
+    );
+
     await call('tap', {
       'finder': {'key': 'errors-demo'},
     });
@@ -147,6 +161,45 @@ void main() {
     expect(
       stop['expectations'],
       allOf(containsPair('passed', 1), containsPair('failed', 1)),
+    );
+
+    // The recording becomes a plain integration test that passes without MCP.
+    final export =
+        await call('export_test', {
+              'name': 'e2e_recorded_session',
+              'imports': ['demo_app.dart'],
+              'appMain': 'startDemoApp();',
+              'overwrite': true,
+            })
+            as Map;
+    final path = export['path'] as String;
+    addTearDown(() => File(path).delete());
+    expect(export, containsPair('skippedExpectations', 1));
+    final source = await File(path).readAsString();
+    expect(
+      source,
+      allOf(
+        contains("find.byKey(const ValueKey<String>('username'))"),
+        contains("expect(find.text('Hello, eduardo'), findsWidgets);"),
+        contains('// Did not hold while recording'),
+      ),
+    );
+
+    final replay = await Process.run(
+      'flutter',
+      [
+        'test',
+        'integration_test/e2e_recorded_session_test.dart',
+        '-d',
+        'flutter-tester',
+      ],
+      workingDirectory: exampleDir,
+      runInShell: Platform.isWindows,
+    );
+    expect(
+      replay.exitCode,
+      0,
+      reason: 'exported test failed:\n${replay.stdout}\n${replay.stderr}',
     );
   });
 }
